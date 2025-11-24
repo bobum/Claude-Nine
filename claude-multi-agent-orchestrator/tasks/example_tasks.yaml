@@ -1,0 +1,166 @@
+# Example Feature Tasks for Multi-Agent Orchestrator
+#
+# This file defines features that will be developed in parallel by different agents.
+# Each feature runs on its own branch and is eventually merged into main.
+
+features:
+  - name: auth_system
+    role: Authentication System Developer
+    goal: Implement a secure JWT-based authentication system
+    branch: feature/auth-system
+    description: |
+      Implement a complete JWT authentication system for the application.
+
+      Requirements:
+      1. Create a user authentication module with the following:
+         - User registration endpoint
+         - User login endpoint with JWT token generation
+         - Token verification middleware
+         - Password hashing using bcrypt
+
+      2. File structure:
+         - src/auth/auth.js - Main authentication logic
+         - src/auth/middleware.js - JWT verification middleware
+         - src/auth/utils.js - Helper functions for password hashing
+
+      3. Security requirements:
+         - Use strong password hashing (bcrypt with salt rounds >= 10)
+         - JWT tokens should expire after 24 hours
+         - Include refresh token mechanism
+         - Validate input to prevent injection attacks
+
+      4. Testing:
+         - Create tests in tests/auth.test.js
+         - Test registration, login, and token verification
+         - Test edge cases (invalid credentials, expired tokens)
+
+      Implementation steps:
+      1. Create the directory structure
+      2. Implement password hashing utilities
+      3. Implement user registration logic
+      4. Implement login and JWT generation
+      5. Create middleware for token verification
+      6. Write comprehensive tests
+      7. Document the API endpoints in comments
+
+    expected_output: |
+      Complete JWT authentication system with:
+      - User registration and login functionality
+      - Secure password hashing
+      - JWT token generation and verification
+      - Middleware for protected routes
+      - Comprehensive tests
+      All code committed to branch feature/auth-system
+
+  - name: api_logging
+    role: API Logging Developer
+    goal: Implement comprehensive API request/response logging with Winston
+    branch: feature/api-logging
+    description: |
+      Implement a robust logging system for all API requests and responses.
+
+      Requirements:
+      1. Set up Winston logger with:
+         - Console transport for development
+         - File transport for production (logs/api.log)
+         - Separate error log file (logs/error.log)
+         - JSON format for structured logging
+         - Log rotation (daily, max 14 days)
+
+      2. Create logging middleware that captures:
+         - Request method, URL, headers, body
+         - Response status code, response time
+         - User information (if authenticated)
+         - Timestamp in ISO format
+         - Unique request ID for tracing
+
+      3. File structure:
+         - src/logging/logger.js - Winston configuration
+         - src/logging/middleware.js - Express middleware
+         - src/logging/formatters.js - Custom log formatters
+
+      4. Features:
+         - Redact sensitive information (passwords, tokens)
+         - Include correlation IDs for request tracing
+         - Performance metrics (response time)
+         - Error stack traces for 500 errors
+
+      Implementation steps:
+      1. Install and configure Winston
+      2. Create custom log formatters
+      3. Implement request/response logging middleware
+      4. Add sensitive data redaction
+      5. Set up log rotation
+      6. Create configuration for different environments
+      7. Add tests for logging functionality
+      8. Document usage in comments
+
+    expected_output: |
+      Complete API logging system with:
+      - Winston logger configured with multiple transports
+      - Middleware for automatic request/response logging
+      - Sensitive data redaction
+      - Log rotation and retention policies
+      - Tests for logging functionality
+      All code committed to branch feature/api-logging
+
+  - name: openapi_docs
+    role: OpenAPI Documentation Developer
+    goal: Create comprehensive Swagger/OpenAPI documentation for all API endpoints
+    branch: feature/openapi-docs
+    description: |
+      Implement comprehensive API documentation using OpenAPI 3.0 and Swagger UI.
+
+      Requirements:
+      1. Set up Swagger/OpenAPI documentation:
+         - Use swagger-jsdoc for JSDoc-based documentation
+         - Use swagger-ui-express for interactive documentation
+         - OpenAPI 3.0 specification
+         - Serve docs at /api-docs endpoint
+
+      2. Document all API endpoints including:
+         - Authentication endpoints (login, register)
+         - User management endpoints
+         - Request/response schemas
+         - Authentication requirements
+         - Error responses
+
+      3. File structure:
+         - src/docs/swagger.js - Swagger configuration
+         - src/docs/schemas.js - OpenAPI schemas
+         - src/docs/paths/ - Path documentation files
+
+      4. Features:
+         - Interactive API testing through Swagger UI
+         - Request/response examples
+         - Schema validation examples
+         - Authentication setup instructions
+         - Try-it-out functionality
+
+      Implementation steps:
+      1. Install swagger-jsdoc and swagger-ui-express
+      2. Create base OpenAPI configuration
+      3. Define common schemas (User, Error, Token)
+      4. Document authentication endpoints with JSDoc
+      5. Document all API paths with parameters
+      6. Add request/response examples
+      7. Set up Swagger UI middleware
+      8. Add authentication support in Swagger UI
+      9. Test all documented endpoints
+      10. Write documentation README
+
+    expected_output: |
+      Complete OpenAPI documentation with:
+      - Swagger UI accessible at /api-docs
+      - All endpoints documented with schemas
+      - Request/response examples
+      - Interactive API testing capability
+      - Authentication integration
+      - Comprehensive README for documentation
+      All code committed to branch feature/openapi-docs
+
+# Notes:
+# - Each feature will be developed by a separate agent in parallel
+# - The monitor agent will watch for conflicts between features
+# - Features may overlap (e.g., auth endpoints need to be documented in OpenAPI)
+# - The orchestrator will handle merging when features are complete
