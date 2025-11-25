@@ -250,7 +250,7 @@ echo -e "${BLUE}[5/6] Creating Helper Scripts...${NC}"
 echo ""
 
 # Create start script
-cat > start.sh << 'EOF'
+cat > start.sh << EOF
 #!/bin/bash
 
 # Start Claude-Nine (API + Dashboard)
@@ -261,8 +261,8 @@ echo ""
 # Start API in background
 echo "Starting API server on http://localhost:8000..."
 cd api
-python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000 &
-API_PID=$!
+$PYTHON_CMD -m uvicorn app.main:app --host 0.0.0.0 --port 8000 &
+API_PID=\$!
 cd ..
 
 # Wait for API to start
@@ -272,7 +272,7 @@ sleep 3
 echo "Starting Dashboard on http://localhost:3000..."
 cd dashboard
 npm run dev &
-DASHBOARD_PID=$!
+DASHBOARD_PID=\$!
 cd ..
 
 echo ""
@@ -286,7 +286,7 @@ echo "Press Ctrl+C to stop both servers"
 echo ""
 
 # Wait for Ctrl+C
-trap "echo 'Stopping Claude-Nine...'; kill $API_PID $DASHBOARD_PID 2>/dev/null; exit" SIGINT SIGTERM
+trap "echo 'Stopping Claude-Nine...'; kill \$API_PID \$DASHBOARD_PID 2>/dev/null; exit" SIGINT SIGTERM
 
 wait
 EOF
