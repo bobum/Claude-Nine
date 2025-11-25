@@ -1,10 +1,11 @@
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
 from .database import engine, get_db, Base
 from .config import settings
 from .routes import teams, agents, work_items
+from .websocket import manager
 
 # Create tables (for development - use Alembic in production)
 Base.metadata.create_all(bind=engine)
@@ -66,6 +67,27 @@ def root():
 app.include_router(teams.router, prefix="/api/teams", tags=["teams"])
 app.include_router(agents.router, prefix="/api/agents", tags=["agents"])
 app.include_router(work_items.router, prefix="/api/work-items", tags=["work-items"])
+
+
+# WebSocket endpoint
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    """WebSocket endpoint for real-time updates"""
+    await manager.connect(websocket)
+    try:
+        while True:
+            # Receive messages from client (e.g., subscribe to team)
+            data = await websocket.receive_json()
+            if data.get("action") == "subscribe_team":
+                team_id = data.get("team_id")
+                if team_id:
+                    await manager.subscribe_to_team(websocket, team_id)
+                    await manager.send_personal_message(
+                        {"type": "subscribed", "team_id": team_id},
+                        websocket
+                    )
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
 
 
 if __name__ == "__main__":
