@@ -175,12 +175,19 @@ cd api
 
 REM Create .env file if not keeping existing
 if not defined KEEP_EXISTING (
+    REM Generate a secure secret key
+    for /f "delims=" %%i in ('%PYTHON_CMD% -c "import secrets; print(secrets.token_urlsafe(32))" 2^>nul') do set SECRET_KEY=%%i
+    if "!SECRET_KEY!"=="" set SECRET_KEY=change-me-%RANDOM%-%RANDOM%
+
     echo Creating api\.env configuration...
     (
         echo # Claude-Nine API Configuration (Local Setup^)
         echo.
         echo # Database - SQLite (no cloud database needed^)
         echo DATABASE_URL=sqlite:///./claude_nine.db
+        echo.
+        echo # Security
+        echo SECRET_KEY=!SECRET_KEY!
         echo.
         echo # Anthropic API Key (required for Claude AI^)
         echo ANTHROPIC_API_KEY=!ANTHROPIC_API_KEY!
