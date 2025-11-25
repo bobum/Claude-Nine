@@ -53,18 +53,8 @@ export function TutorialProvider({ children }: TutorialProviderProps) {
   }, []);
 
   const startTutorial = (newSteps: Step[]) => {
-    console.log("startTutorial called:", {
-      isTutorialEnabled,
-      mounted,
-      stepsCount: newSteps.length
-    });
+    if (!isTutorialEnabled) return;
 
-    if (!isTutorialEnabled) {
-      console.log("Tutorial is disabled, not starting");
-      return;
-    }
-
-    console.log("Setting tutorial to run...");
     setSteps(newSteps);
     setStepIndex(0);
     setRun(true);
