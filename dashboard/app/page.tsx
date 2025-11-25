@@ -2,6 +2,9 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import ThemeToggle from "@/components/ThemeToggle";
+import Toast from "@/components/Toast";
+import { useToast, useWebSocket } from "@/lib/hooks";
 
 interface HealthStatus {
   status: string;
@@ -12,6 +15,8 @@ interface HealthStatus {
 export default function Home() {
   const [apiHealth, setApiHealth] = useState<HealthStatus | null>(null);
   const [loading, setLoading] = useState(true);
+  const { toasts, removeToast, success } = useToast();
+  const { isConnected } = useWebSocket("ws://localhost:8000/ws");
 
   useEffect(() => {
     fetch("http://localhost:8000/health")
@@ -26,13 +31,28 @@ export default function Home() {
       });
   }, []);
 
+  useEffect(() => {
+    if (isConnected) {
+      success("Connected to real-time updates");
+    }
+  }, [isConnected, success]);
+
   return (
     <div className="min-h-screen flex flex-col">
-      {/* Header */}
       <header className="bg-gray-900 text-white py-4 px-6 shadow-md">
         <div className="max-w-7xl mx-auto flex justify-between items-center">
           <h1 className="text-2xl font-bold">Claude-Nine</h1>
           <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <div
+                className={`w-2 h-2 rounded-full ${
+                  isConnected ? "bg-green-500 animate-pulse" : "bg-gray-500"
+                }`}
+              />
+              <span className="text-sm">
+                {isConnected ? "Live" : "Connecting..."}
+              </span>
+            </div>
             <div className="flex items-center gap-2">
               <div
                 className={`w-2 h-2 rounded-full ${
@@ -43,14 +63,15 @@ export default function Home() {
                 API {loading ? "Checking..." : apiHealth?.status || "Offline"}
               </span>
             </div>
+            <ThemeToggle />
           </div>
         </div>
       </header>
 
-      {/* Main Content */}
+      <Toast toasts={toasts} onRemove={removeToast} />
+
       <main className="flex-1 bg-gray-50">
         <div className="max-w-7xl mx-auto py-12 px-6">
-          {/* Hero Section */}
           <div className="text-center mb-12">
             <h2 className="text-4xl font-bold text-gray-900 mb-4">
               Dev Team in a Box
@@ -60,7 +81,6 @@ export default function Home() {
             </p>
           </div>
 
-          {/* Feature Cards */}
           <div className="grid md:grid-cols-3 gap-6 mb-12">
             <div className="bg-white rounded-lg shadow p-6">
               <div className="text-3xl mb-4">👥</div>
@@ -105,14 +125,16 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Quick Start */}
           <div className="bg-white rounded-lg shadow p-8">
             <h3 className="text-2xl font-semibold mb-4">Quick Start</h3>
             <ol className="space-y-3 text-gray-700">
               <li className="flex items-start">
                 <span className="font-semibold mr-2">1.</span>
                 <span>
-                  <Link href="/teams/new" className="text-blue-600 hover:text-blue-800">
+                  <Link
+                    href="/teams/new"
+                    className="text-blue-600 hover:text-blue-800"
+                  >
                     Create your first team
                   </Link>{" "}
                   and add agents
@@ -135,7 +157,6 @@ export default function Home() {
         </div>
       </main>
 
-      {/* Footer */}
       <footer className="bg-gray-900 text-white py-6 px-6">
         <div className="max-w-7xl mx-auto text-center">
           <p className="text-sm text-gray-400">
