@@ -222,6 +222,18 @@ Push-Location api
 
 # Create .env file if not keeping existing
 if (-not $keepExisting) {
+    # Generate a secure secret key
+    try {
+        $secretKey = & $pythonCmd -c "import secrets; print(secrets.token_urlsafe(32))" 2>$null
+        if ([string]::IsNullOrWhiteSpace($secretKey)) {
+            throw "Python failed to generate key"
+        }
+    }
+    catch {
+        # Fallback to PowerShell random
+        $secretKey = "change-me-$(Get-Random)-$(Get-Date -Format 'yyyyMMddHHmmss')"
+    }
+
     Write-Host "Creating api\.env configuration..."
 
     $envContent = @"
@@ -229,6 +241,9 @@ if (-not $keepExisting) {
 
 # Database - SQLite (no cloud database needed)
 DATABASE_URL=sqlite:///./claude_nine.db
+
+# Security
+SECRET_KEY=$secretKey
 
 # Anthropic API Key (required for Claude AI)
 ANTHROPIC_API_KEY=$anthropicApiKey

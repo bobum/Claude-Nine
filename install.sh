@@ -178,6 +178,9 @@ echo ""
 
 cd api
 
+# Generate a secure secret key
+SECRET_KEY=$(python -c "import secrets; print(secrets.token_urlsafe(32))" 2>/dev/null || openssl rand -base64 32 2>/dev/null || echo "change-me-$(date +%s)-$(shuf -i 1000-9999 -n 1)")
+
 # Create .env file
 echo "Creating api/.env configuration..."
 cat > .env << EOF
@@ -185,6 +188,9 @@ cat > .env << EOF
 
 # Database - SQLite (no cloud database needed)
 DATABASE_URL=sqlite:///./claude_nine.db
+
+# Security
+SECRET_KEY=$SECRET_KEY
 
 # Anthropic API Key (required for Claude AI)
 ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY
