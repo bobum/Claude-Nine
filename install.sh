@@ -50,28 +50,30 @@ get_version() {
 echo -e "${BLUE}[1/6] Checking Prerequisites...${NC}"
 echo ""
 
-# Check Python
-if command_exists python3; then
-    PYTHON_VERSION=$(python3 --version 2>&1 | awk '{print $2}')
-    echo -e "${GREEN}✓${NC} Python 3 found: $PYTHON_VERSION"
-    PYTHON_CMD=python3
-elif command_exists python; then
+# Check Python - Try to actually run it, not just check if it exists
+PYTHON_CMD=""
+if python --version >/dev/null 2>&1; then
     PYTHON_VERSION=$(python --version 2>&1 | awk '{print $2}')
     echo -e "${GREEN}✓${NC} Python found: $PYTHON_VERSION"
     PYTHON_CMD=python
+elif python3 --version >/dev/null 2>&1; then
+    PYTHON_VERSION=$(python3 --version 2>&1 | awk '{print $2}')
+    echo -e "${GREEN}✓${NC} Python 3 found: $PYTHON_VERSION"
+    PYTHON_CMD=python3
 else
     echo -e "${RED}✗ Python 3.12+ is required but not found${NC}"
     echo "  Please install Python from https://www.python.org/downloads/"
     exit 1
 fi
 
-# Check pip
-if command_exists pip3; then
-    echo -e "${GREEN}✓${NC} pip3 found"
-    PIP_CMD=pip3
-elif command_exists pip; then
+# Check pip - Try to actually run it, not just check if it exists
+PIP_CMD=""
+if pip --version >/dev/null 2>&1; then
     echo -e "${GREEN}✓${NC} pip found"
     PIP_CMD=pip
+elif pip3 --version >/dev/null 2>&1; then
+    echo -e "${GREEN}✓${NC} pip3 found"
+    PIP_CMD=pip3
 else
     echo -e "${RED}✗ pip is required but not found${NC}"
     echo "  Please install pip"
