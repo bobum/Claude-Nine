@@ -42,11 +42,40 @@
 
 </div>
 
+## 🏠 Runs 100% Locally
+
+**Claude-Nine runs entirely on your machine** - no cloud infrastructure required!
+
+```bash
+# One-line installation
+./install.sh
+
+# Start Claude-Nine
+./start.sh
+
+# Open http://localhost:3000
+```
+
+✅ Local database (SQLite - no setup needed)
+✅ Local API server (FastAPI on localhost:8000)
+✅ Local dashboard (Next.js on localhost:3000)
+✅ Your git repos stay local
+⚡ Only dependency: Anthropic API for Claude AI
+
+**[📖 Local Setup Guide](docs/local-setup-guide.md)** | **[🚀 Quick Start](#-quick-start)**
+
+---
+
 ## 🌟 What is CLAUDE-9?
 
-**CLAUDE-9** is a revolutionary multi-agent orchestration system that enables **multiple Claude AI agents** to work simultaneously on different features in the same codebase—without stepping on each other's toes.
+**CLAUDE-9** is a revolutionary multi-agent orchestration platform that enables **multiple Claude AI agents** to work simultaneously on different features in the same codebase—without stepping on each other's toes.
 
-Think of it as **conducting a symphony of AI developers**, where each musician (agent) plays their part in perfect harmony, all while a master conductor (monitor agent) ensures everything comes together beautifully.
+Think of it as your **personal AI development team in a box**, complete with:
+- 🎛️ **Web Dashboard** - Manage teams, assign work, monitor progress
+- 🤖 **AI Agents** - Claude-powered developers working in parallel
+- 📋 **Work Queue** - Integrate with Azure DevOps, Jira, GitHub, or create manual tasks
+- 📊 **Real-time Monitoring** - Watch your AI team code in real-time
+- 🔄 **Git Worktrees** - Each agent works in isolated directories
 
 ### 🎭 The Magic
 
@@ -123,42 +152,51 @@ Simple, declarative task definitions make it easy to specify exactly what you wa
 ### Prerequisites
 
 ```bash
-✓ Python 3.8+
-✓ Git 2.7+ (for worktree support)
-✓ Anthropic API key
-✓ A git repository to enhance
+✓ Python 3.12+
+✓ Node.js 18+
+✓ Git 2.7+
+✓ Anthropic API key (get one at console.anthropic.com)
 ```
 
-### Installation
+### One-Command Installation
 
 ```bash
-# 1. Clone CLAUDE-9
-git clone https://github.com/yourusername/Claude-Nine.git
-cd Claude-Nine/claude-multi-agent-orchestrator
+# 1. Clone Claude-Nine
+git clone https://github.com/bobum/Claude-Nine.git
+cd Claude-Nine
 
-# 2. Set up Python environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+# 2. Run the installer (checks everything and sets up automatically)
+./install.sh
 
-# 3. Install dependencies
-pip install -r requirements.txt
-
-# 4. Configure your API key
-export ANTHROPIC_API_KEY="your-api-key-here"
-# Or edit config.yaml
+# 3. Start Claude-Nine
+./start.sh
 ```
 
-### Your First CLAUDE-9 Flight ✈️
+The installer will:
+1. ✓ Check Python, Node.js, and Git are installed
+2. ✓ Prompt for your Anthropic API key
+3. ✓ Set up the API server with local SQLite database
+4. ✓ Install dashboard dependencies
+5. ✓ Create helper scripts (start.sh, stop.sh)
+
+###  Your First Claude-Nine Session 🚀
 
 ```bash
-# Navigate to your project
-cd /path/to/your-project
+# Start everything
+./start.sh
 
-# Take off! 🛫
-python /path/to/Claude-Nine/claude-multi-agent-orchestrator/orchestrator.py
+# Open your browser
+open http://localhost:3000  # macOS
+# or visit http://localhost:3000 in your browser
 ```
 
-**That's it!** Watch as multiple Claude agents collaborate to build your features in parallel.
+**What you'll see:**
+- 🎯 **Interactive Tutorial** - Guides you through all features
+- 👥 **Teams Page** - Create AI development teams
+- 📋 **Work Queue** - Assign tasks from DevOps/Jira or create manually
+- 📊 **Real-time Dashboard** - Monitor your AI agents working
+
+**That's it!** Your AI development team is ready to code.
 
 ## 🎬 Example: Building an Express API
 

@@ -1,0 +1,24 @@
+import type { Metadata } from "next";
+import "./globals.css";
+import { TutorialProvider } from "@/components/Tutorial";
+
+export const metadata: Metadata = {
+  title: "Claude-Nine Dashboard",
+  description: "AI Development Teams Orchestration Platform",
+};
+
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
+  return (
+    <html lang="en">
+      <body className="antialiased">
+        <TutorialProvider>
+          {children}
+        </TutorialProvider>
+      </body>
+    </html>
+  );
+}
