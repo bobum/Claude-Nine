@@ -261,7 +261,7 @@ REM Create start.bat
     echo.
     echo REM Start API in background
     echo echo Starting API server on http://localhost:8000...
-    echo start /B cmd /c "cd api && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    echo start /B cmd /c "cd api && %PYTHON_CMD% -m uvicorn app.main:app --host 0.0.0.0 --port 8000"
     echo.
     echo REM Wait for API to start
     echo timeout /t 3 /nobreak ^> nul
