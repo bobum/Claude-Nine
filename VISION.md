@@ -299,7 +299,7 @@ dashboard/
     └── useWebSocket.ts
 ```
 
-### Database Schema (PostgreSQL)
+### Database Schema (SQLite/PostgreSQL)
 
 ```sql
 -- Teams
@@ -541,9 +541,10 @@ teams:
 ### Prerequisites
 - Python 3.12+
 - Node.js 18+
-- PostgreSQL 14+
 - Git
-- Azure DevOps account (or Jira, GitHub, etc.)
+- Anthropic API key (for Claude AI)
+- Optional: Azure DevOps, Jira, or GitHub account for work item integration
+- Optional: PostgreSQL 14+ (SQLite included by default for local use)
 
 ### Quick Start
 

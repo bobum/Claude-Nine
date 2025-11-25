@@ -13,16 +13,28 @@ pip install -r requirements.txt
 
 ### 2. Configure Environment
 
-Copy `.env.example` to `.env` and update with your values:
+Create `.env` file:
 
 ```bash
-cp .env.example .env
+cat > .env << EOF
+# Database - SQLite (default for local use)
+DATABASE_URL=sqlite:///./claude_nine.db
+
+# Anthropic API Key (required)
+ANTHROPIC_API_KEY=your-api-key-here
+
+# API Server Settings
+API_HOST=0.0.0.0
+API_PORT=8000
+DEBUG=True
+EOF
 ```
 
-Edit `.env`:
+**Optional: Using PostgreSQL instead of SQLite**
+
+If you prefer PostgreSQL for production or higher concurrency:
 ```
-DATABASE_URL=postgresql://claude_admin:YourPassword@claude-nine-db.postgres.database.azure.com:5432/claude_nine?sslmode=require
-ANTHROPIC_API_KEY=your-key-here
+DATABASE_URL=postgresql://username:password@localhost:5432/claude_nine
 ```
 
 ### 3. Run the API
