@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from .database import engine, get_db, Base
 from .config import settings
 from .routes import teams, agents, work_items
+from .routes import settings as settings_router
 from .websocket import manager
 
 # Create tables (for development - use Alembic in production)
@@ -67,6 +68,7 @@ def root():
 app.include_router(teams.router, prefix="/api/teams", tags=["teams"])
 app.include_router(agents.router, prefix="/api/agents", tags=["agents"])
 app.include_router(work_items.router, prefix="/api/work-items", tags=["work-items"])
+app.include_router(settings_router.router, prefix="/api/settings", tags=["settings"])
 
 
 # WebSocket endpoint

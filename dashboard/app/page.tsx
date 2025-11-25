@@ -86,6 +86,14 @@ export default function Home() {
             <div data-tour="theme-toggle">
               <ThemeToggle />
             </div>
+            <Tooltip content="Configure API keys and integrations">
+              <Link
+                href="/settings"
+                className="text-white hover:text-gray-300 transition-colors"
+              >
+                <span className="text-2xl">⚙️</span>
+              </Link>
+            </Tooltip>
             <TutorialSettings />
           </div>
         </div>
@@ -178,6 +186,18 @@ export default function Home() {
                 <span className="font-semibold mr-2">1.</span>
                 <span>
                   <Link
+                    href="/settings"
+                    className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300"
+                  >
+                    Configure your API keys
+                  </Link>{" "}
+                  for Anthropic and integrations
+                </span>
+              </li>
+              <li className="flex items-start">
+                <span className="font-semibold mr-2">2.</span>
+                <span>
+                  <Link
                     href="/teams/new"
                     className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300"
                   >
@@ -187,15 +207,15 @@ export default function Home() {
                 </span>
               </li>
               <li className="flex items-start">
-                <span className="font-semibold mr-2">2.</span>
-                <span>Connect to Azure DevOps, Jira, or GitHub</span>
-              </li>
-              <li className="flex items-start">
                 <span className="font-semibold mr-2">3.</span>
-                <span>Assign work items to teams</span>
+                <span>Connect to Azure DevOps, Jira, or GitHub via Settings</span>
               </li>
               <li className="flex items-start">
                 <span className="font-semibold mr-2">4.</span>
+                <span>Assign work items to teams</span>
+              </li>
+              <li className="flex items-start">
+                <span className="font-semibold mr-2">5.</span>
                 <span>Start the team and watch your AI developers work!</span>
               </li>
             </ol>

@@ -109,8 +109,8 @@ echo ""
 echo -e "${GREEN}All prerequisites met!${NC}"
 echo ""
 
-# Get Anthropic API Key
-echo -e "${BLUE}[2/6] Configuring API Key...${NC}"
+# Get API Keys and Integration Credentials
+echo -e "${BLUE}[2/6] Configuring API Keys & Integrations...${NC}"
 echo ""
 echo "Claude-Nine uses Anthropic's Claude AI for intelligent agents."
 echo "You'll need an API key from: https://console.anthropic.com/settings/keys"
@@ -128,7 +128,7 @@ if [ -f "api/.env" ] && grep -q "ANTHROPIC_API_KEY" api/.env 2>/dev/null; then
     fi
 fi
 
-# Prompt for API key if not set
+# Prompt for Anthropic API key if not set
 if [ -z "$ANTHROPIC_API_KEY" ]; then
     read -p "Enter your Anthropic API key (or press Enter to set it later): " ANTHROPIC_API_KEY
     if [ -z "$ANTHROPIC_API_KEY" ]; then
@@ -137,6 +137,37 @@ if [ -z "$ANTHROPIC_API_KEY" ]; then
     fi
 fi
 
+echo ""
+echo -e "${BLUE}Optional Integrations:${NC}"
+echo "You can configure these now or later via the Settings page in the web UI."
+echo ""
+
+# Azure DevOps
+echo -e "${BLUE}Azure DevOps${NC} (press Enter to skip)"
+read -p "Azure DevOps URL (e.g., https://dev.azure.com): " AZURE_DEVOPS_URL
+if [ ! -z "$AZURE_DEVOPS_URL" ]; then
+    read -p "Organization name: " AZURE_DEVOPS_ORGANIZATION
+    read -p "Personal Access Token: " AZURE_DEVOPS_TOKEN
+fi
+echo ""
+
+# Jira
+echo -e "${BLUE}Jira${NC} (press Enter to skip)"
+read -p "Jira URL (e.g., https://yourcompany.atlassian.net): " JIRA_URL
+if [ ! -z "$JIRA_URL" ]; then
+    read -p "Jira email: " JIRA_EMAIL
+    read -p "Jira API token: " JIRA_API_TOKEN
+fi
+echo ""
+
+# GitHub
+echo -e "${BLUE}GitHub${NC} (press Enter to skip)"
+read -p "GitHub Personal Access Token: " GITHUB_TOKEN
+echo ""
+
+# Linear
+echo -e "${BLUE}Linear${NC} (press Enter to skip)"
+read -p "Linear API key: " LINEAR_API_KEY
 echo ""
 
 # Set up API
@@ -160,6 +191,25 @@ ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY
 API_HOST=0.0.0.0
 API_PORT=8000
 DEBUG=True
+
+# Integration Credentials (Optional)
+# You can also configure these via the Settings page in the web UI
+
+# Azure DevOps
+AZURE_DEVOPS_URL=$AZURE_DEVOPS_URL
+AZURE_DEVOPS_ORGANIZATION=$AZURE_DEVOPS_ORGANIZATION
+AZURE_DEVOPS_TOKEN=$AZURE_DEVOPS_TOKEN
+
+# Jira
+JIRA_URL=$JIRA_URL
+JIRA_EMAIL=$JIRA_EMAIL
+JIRA_API_TOKEN=$JIRA_API_TOKEN
+
+# GitHub
+GITHUB_TOKEN=$GITHUB_TOKEN
+
+# Linear
+LINEAR_API_KEY=$LINEAR_API_KEY
 EOF
 
 echo -e "${GREEN}✓${NC} Configuration file created: api/.env"
