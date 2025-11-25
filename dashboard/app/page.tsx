@@ -18,9 +18,15 @@ interface HealthStatus {
 export default function Home() {
   const [apiHealth, setApiHealth] = useState<HealthStatus | null>(null);
   const [loading, setLoading] = useState(true);
+  const [mounted, setMounted] = useState(false);
   const { toasts, removeToast, success } = useToast();
   const { isConnected } = useWebSocket("ws://localhost:8000/ws");
   const { startTutorial } = useTutorial();
+
+  // Wait for client-side hydration
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     fetch("http://localhost:8000/health")
@@ -41,8 +47,10 @@ export default function Home() {
     }
   }, [isConnected, success]);
 
-  // Start tutorial on first visit
+  // Start tutorial on first visit (only after mounted)
   useEffect(() => {
+    if (!mounted) return;
+
     const completed = localStorage.getItem("claude-nine-tutorial-completed");
     if (!completed) {
       // Delay to ensure page is fully rendered
@@ -51,7 +59,7 @@ export default function Home() {
       }, 1500);
       return () => clearTimeout(timer);
     }
-  }, [startTutorial]);
+  }, [startTutorial, mounted]);
 
   return (
     <div className="min-h-screen flex flex-col">

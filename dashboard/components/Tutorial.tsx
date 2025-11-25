@@ -29,9 +29,13 @@ export function TutorialProvider({ children }: TutorialProviderProps) {
   const [steps, setSteps] = useState<Step[]>([]);
   const [isTutorialEnabled, setIsTutorialEnabled] = useState(true);
   const [stepIndex, setStepIndex] = useState(0);
+  const [mounted, setMounted] = useState(false);
 
+  // Wait for client-side hydration before accessing localStorage
   useEffect(() => {
-    // Load tutorial preference from localStorage
+    setMounted(true);
+
+    // Load tutorial preference from localStorage (client-side only)
     const enabled = localStorage.getItem("claude-nine-tutorial-enabled");
     if (enabled !== null) {
       setIsTutorialEnabled(enabled === "true");
@@ -95,43 +99,45 @@ export function TutorialProvider({ children }: TutorialProviderProps) {
       }}
     >
       {children}
-      <Joyride
-        steps={steps}
-        run={run}
-        stepIndex={stepIndex}
-        continuous
-        showProgress
-        showSkipButton
-        callback={handleJoyrideCallback}
-        styles={{
-          options: {
-            primaryColor: "#2563eb",
-            zIndex: 10000,
-          },
-          tooltip: {
-            fontSize: 14,
-          },
-          buttonNext: {
-            backgroundColor: "#2563eb",
-            borderRadius: "0.375rem",
-            padding: "0.5rem 1rem",
-          },
-          buttonBack: {
-            color: "#6b7280",
-            marginRight: "0.5rem",
-          },
-          buttonSkip: {
-            color: "#6b7280",
-          },
-        }}
-        locale={{
-          back: "Back",
-          close: "Close",
-          last: "Finish",
-          next: "Next",
-          skip: "Skip Tour",
-        }}
-      />
+      {mounted && (
+        <Joyride
+          steps={steps}
+          run={run}
+          stepIndex={stepIndex}
+          continuous
+          showProgress
+          showSkipButton
+          callback={handleJoyrideCallback}
+          styles={{
+            options: {
+              primaryColor: "#2563eb",
+              zIndex: 10000,
+            },
+            tooltip: {
+              fontSize: 14,
+            },
+            buttonNext: {
+              backgroundColor: "#2563eb",
+              borderRadius: "0.375rem",
+              padding: "0.5rem 1rem",
+            },
+            buttonBack: {
+              color: "#6b7280",
+              marginRight: "0.5rem",
+            },
+            buttonSkip: {
+              color: "#6b7280",
+            },
+          }}
+          locale={{
+            back: "Back",
+            close: "Close",
+            last: "Finish",
+            next: "Next",
+            skip: "Skip Tour",
+          }}
+        />
+      )}
     </TutorialContext.Provider>
   );
 }
