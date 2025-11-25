@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { TutorialProvider } from "@/components/Tutorial";
 
 export const metadata: Metadata = {
   title: "Claude-Nine Dashboard",
@@ -14,7 +15,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="antialiased">
-        {children}
+        <TutorialProvider>
+          {children}
+        </TutorialProvider>
       </body>
     </html>
   );
