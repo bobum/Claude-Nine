@@ -224,6 +224,9 @@ echo -e "${GREEN}✓${NC} Configuration file created: api/.env"
 
 # Install Python dependencies
 echo ""
+echo "Upgrading pip to latest version..."
+$PYTHON_CMD -m pip install --upgrade pip >/dev/null 2>&1
+
 echo "Installing Python dependencies..."
 if $PIP_CMD install -r requirements.txt > /tmp/claude-nine-pip-install.log 2>&1; then
     echo -e "${GREEN}✓${NC} Python dependencies installed"
