@@ -191,3 +191,19 @@ export async function updateWorkItem(
   if (!response.ok) throw new Error("Failed to update work item");
   return response.json();
 }
+
+export async function bulkAssignWorkItems(
+  workItemIds: string[],
+  teamId: string
+): Promise<WorkItem[]> {
+  const response = await fetch(`${API_BASE_URL}/api/work-items/bulk-assign`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      work_item_ids: workItemIds,
+      team_id: teamId,
+    }),
+  });
+  if (!response.ok) throw new Error("Failed to bulk assign work items");
+  return response.json();
+}

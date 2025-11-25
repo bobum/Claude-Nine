@@ -111,6 +111,11 @@ class WorkItemUpdate(BaseModel):
     priority: Optional[int] = None
 
 
+class BulkAssignRequest(BaseModel):
+    work_item_ids: List[UUID4]
+    team_id: UUID4
+
+
 class WorkItem(WorkItemBase):
     id: UUID4
     team_id: Optional[UUID4] = None

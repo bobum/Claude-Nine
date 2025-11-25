@@ -4,8 +4,8 @@ from typing import List, Optional
 from uuid import UUID
 
 from ..database import get_db
-from ..models import WorkItem
-from ..schemas import WorkItem as WorkItemSchema, WorkItemCreate, WorkItemUpdate
+from ..models import WorkItem, Team
+from ..schemas import WorkItem as WorkItemSchema, WorkItemCreate, WorkItemUpdate, BulkAssignRequest
 
 router = APIRouter()
 
@@ -106,3 +106,39 @@ def delete_work_item(
     db.delete(db_work_item)
     db.commit()
     return None
+
+
+@router.post("/bulk-assign", response_model=List[WorkItemSchema])
+def bulk_assign_work_items(
+    request: BulkAssignRequest,
+    db: Session = Depends(get_db)
+):
+    """Bulk assign multiple work items to a team"""
+    # Verify team exists
+    team = db.query(Team).filter(Team.id == request.team_id).first()
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+
+    # Get all work items
+    work_items = db.query(WorkItem).filter(WorkItem.id.in_(request.work_item_ids)).all()
+
+    if len(work_items) != len(request.work_item_ids):
+        raise HTTPException(
+            status_code=404,
+            detail="One or more work items not found"
+        )
+
+    # Assign all work items to the team
+    from datetime import datetime
+    for work_item in work_items:
+        work_item.team_id = request.team_id
+        if work_item.status == "queued" or work_item.assigned_at is None:
+            work_item.assigned_at = datetime.utcnow()
+
+    db.commit()
+
+    # Refresh all items to get updated data
+    for work_item in work_items:
+        db.refresh(work_item)
+
+    return work_items
