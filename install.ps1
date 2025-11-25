@@ -304,7 +304,7 @@ Write-Info "[5/6] Creating Helper Scripts..."
 Write-Host ""
 
 # Create start.ps1
-$startScript = @'
+$startScript = @"
 # Start Claude-Nine (API + Dashboard)
 
 Write-Host "Starting Claude-Nine..." -ForegroundColor Cyan
@@ -312,9 +312,9 @@ Write-Host ""
 
 # Start API in background
 Write-Host "Starting API server on http://localhost:8000..." -ForegroundColor Green
-$apiJob = Start-Job -ScriptBlock {
-    Set-Location $using:PWD\api
-    python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+`$apiJob = Start-Job -ScriptBlock {
+    Set-Location `$using:PWD\api
+    $pythonCmd -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 }
 
 # Wait for API to start
@@ -322,8 +322,8 @@ Start-Sleep -Seconds 3
 
 # Start Dashboard in background
 Write-Host "Starting Dashboard on http://localhost:3000..." -ForegroundColor Green
-$dashJob = Start-Job -ScriptBlock {
-    Set-Location $using:PWD\dashboard
+`$dashJob = Start-Job -ScriptBlock {
+    Set-Location `$using:PWD\dashboard
     npm run dev
 }
 
@@ -339,20 +339,20 @@ Write-Host ""
 
 # Wait for jobs and handle Ctrl+C
 try {
-    Wait-Job $apiJob, $dashJob
+    Wait-Job `$apiJob, `$dashJob
 }
 finally {
     Write-Host "Stopping Claude-Nine..." -ForegroundColor Yellow
-    Stop-Job $apiJob, $dashJob
-    Remove-Job $apiJob, $dashJob
+    Stop-Job `$apiJob, `$dashJob
+    Remove-Job `$apiJob, `$dashJob
 
     # Kill any remaining processes
-    Get-Process | Where-Object { $_.Path -like "*uvicorn*" } | Stop-Process -Force -ErrorAction SilentlyContinue
+    Get-Process | Where-Object { `$_.Path -like "*uvicorn*" } | Stop-Process -Force -ErrorAction SilentlyContinue
     Get-NetTCPConnection -LocalPort 8000, 3000 -ErrorAction SilentlyContinue | ForEach-Object {
-        Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue
+        Stop-Process -Id `$_.OwningProcess -Force -ErrorAction SilentlyContinue
     }
 }
-'@
+"@
 
 Set-Content -Path "start.ps1" -Value $startScript
 Write-Success "Created start.ps1 - Run Claude-Nine with: .\start.ps1"
@@ -378,10 +378,10 @@ Set-Content -Path "stop.ps1" -Value $stopScript
 Write-Success "Created stop.ps1 - Stop Claude-Nine with: .\stop.ps1"
 
 # Create api/run.ps1
-$apiRunScript = @'
+$apiRunScript = @"
 # Run the Claude-Nine API server
 
-Set-Location $PSScriptRoot
+Set-Location `$PSScriptRoot
 
 Write-Host "🚀 Starting Claude-Nine API..." -ForegroundColor Cyan
 Write-Host ""
@@ -393,7 +393,10 @@ Write-Host ""
 
 # Check if dependencies are installed
 try {
-    python -c "import fastapi" 2>$null
+    $pythonCmd -c "import fastapi" 2>`$null
+    if (`$LASTEXITCODE -ne 0) {
+        throw "FastAPI not found"
+    }
 }
 catch {
     Write-Host "⚠️  Dependencies not installed. Installing..." -ForegroundColor Yellow
@@ -403,7 +406,7 @@ catch {
 
 # Run the server
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-'@
+"@
 
 Set-Content -Path "api\run.ps1" -Value $apiRunScript
 Write-Success "Created api\run.ps1"
