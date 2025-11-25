@@ -1,16 +1,53 @@
-from sqlalchemy import Column, String, Integer, Boolean, DateTime, Text, ForeignKey, CheckConstraint
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy import Column, String, Integer, Boolean, DateTime, Text, ForeignKey, CheckConstraint, JSON
+from sqlalchemy.dialects.postgresql import UUID as PostgresUUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
+from sqlalchemy import TypeDecorator
 import uuid
 
 from .database import Base
 
 
+# UUID type that works with both PostgreSQL and SQLite
+class GUID(TypeDecorator):
+    """Platform-independent GUID type.
+    Uses PostgreSQL's UUID type, otherwise uses CHAR(36), storing as stringified hex values.
+    """
+    impl = String
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == 'postgresql':
+            return dialect.type_descriptor(PostgresUUID(as_uuid=True))
+        else:
+            return dialect.type_descriptor(String(36))
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return value
+        elif dialect.name == 'postgresql':
+            return value
+        else:
+            if isinstance(value, uuid.UUID):
+                return str(value)
+            else:
+                return value
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return value
+        if not isinstance(value, uuid.UUID):
+            try:
+                value = uuid.UUID(value)
+            except (ValueError, AttributeError):
+                pass
+        return value
+
+
 class Team(Base):
     __tablename__ = "teams"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
     name = Column(String(255), nullable=False, unique=True)
     product = Column(String(255), nullable=False)
     repo_path = Column(String(500), nullable=False)
@@ -34,8 +71,8 @@ class Team(Base):
 class Agent(Base):
     __tablename__ = "agents"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    team_id = Column(GUID(), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)
     name = Column(String(255), nullable=False)
     role = Column(String(255), nullable=False)
     goal = Column(Text)
@@ -59,8 +96,8 @@ class Agent(Base):
 class WorkItem(Base):
     __tablename__ = "work_items"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id", ondelete="SET NULL"))
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    team_id = Column(GUID(), ForeignKey("teams.id", ondelete="SET NULL"))
     external_id = Column(String(255), nullable=False)
     source = Column(String(50), nullable=False)
     title = Column(String(500), nullable=False)
@@ -70,7 +107,7 @@ class WorkItem(Base):
     priority = Column(Integer, default=0)
     story_points = Column(Integer)
     external_url = Column(String(500))
-    external_data = Column(JSONB)
+    external_data = Column(JSON)
     assigned_at = Column(DateTime(timezone=True))
     started_at = Column(DateTime(timezone=True))
     completed_at = Column(DateTime(timezone=True))
@@ -93,11 +130,11 @@ class WorkItem(Base):
 class Integration(Base):
     __tablename__ = "integrations"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    team_id = Column(GUID(), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)
     type = Column(String(50), nullable=False)
     name = Column(String(255))
-    config = Column(JSONB, nullable=False)
+    config = Column(JSON, nullable=False)
     is_active = Column(Boolean, default=True)
     last_sync = Column(DateTime(timezone=True))
     sync_interval = Column(Integer, default=300)
@@ -117,13 +154,13 @@ class Integration(Base):
 class ActivityLog(Base):
     __tablename__ = "activity_logs"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id", ondelete="CASCADE"))
-    agent_id = Column(UUID(as_uuid=True), ForeignKey("agents.id", ondelete="CASCADE"))
-    work_item_id = Column(UUID(as_uuid=True), ForeignKey("work_items.id", ondelete="SET NULL"))
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    team_id = Column(GUID(), ForeignKey("teams.id", ondelete="CASCADE"))
+    agent_id = Column(GUID(), ForeignKey("agents.id", ondelete="CASCADE"))
+    work_item_id = Column(GUID(), ForeignKey("work_items.id", ondelete="SET NULL"))
     event_type = Column(String(100), nullable=False)
     message = Column(Text, nullable=False)
-    metadata = Column(JSONB)
+    event_metadata = Column(JSON)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships
