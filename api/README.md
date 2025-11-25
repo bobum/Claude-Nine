@@ -56,11 +56,12 @@ The API will be available at:
 - `DELETE /api/agents/{id}` - Delete agent
 
 ### Work Items
-- `GET /api/work-items` - List work items
+- `GET /api/work-items` - List work items (supports filtering)
 - `POST /api/work-items` - Create work item
 - `GET /api/work-items/{id}` - Get work item details
 - `PUT /api/work-items/{id}` - Update work item
 - `DELETE /api/work-items/{id}` - Delete work item
+- `POST /api/work-items/bulk-assign` - Bulk assign items to team ⭐ **New**
 
 ## Example Usage
 
@@ -93,6 +94,25 @@ curl -X POST http://localhost:8000/api/teams/{team_id}/agents \
 ```bash
 curl -X POST http://localhost:8000/api/teams/{team_id}/start
 ```
+
+### Bulk Assign Work Items
+
+Assign multiple work items to a team's queue at once:
+
+```bash
+curl -X POST http://localhost:8000/api/work-items/bulk-assign \
+  -H "Content-Type: application/json" \
+  -d '{
+    "work_item_ids": [
+      "uuid-item-1",
+      "uuid-item-2",
+      "uuid-item-3"
+    ],
+    "team_id": "uuid-of-team"
+  }'
+```
+
+**📚 For detailed bulk assignment documentation, see [Bulk Assignment Guide](../docs/bulk-assignment-guide.md)**
 
 ## Development
 
