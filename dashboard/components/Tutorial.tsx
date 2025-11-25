@@ -107,6 +107,9 @@ export function TutorialProvider({ children }: TutorialProviderProps) {
           continuous
           showProgress
           showSkipButton
+          disableOverlayClose
+          disableCloseOnEsc
+          spotlightClicks={false}
           callback={handleJoyrideCallback}
           styles={{
             options: {
