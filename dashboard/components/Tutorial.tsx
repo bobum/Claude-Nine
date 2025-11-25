@@ -76,7 +76,7 @@ export function TutorialProvider({ children }: TutorialProviderProps) {
   };
 
   const handleJoyrideCallback = (data: CallBackProps) => {
-    const { status, type, index } = data;
+    const { status } = data;
     const finishedStatuses: string[] = [STATUS.FINISHED, STATUS.SKIPPED];
 
     if (finishedStatuses.includes(status)) {
@@ -84,9 +84,8 @@ export function TutorialProvider({ children }: TutorialProviderProps) {
       localStorage.setItem("claude-nine-tutorial-completed", "true");
     }
 
-    if (type === EVENTS.STEP_AFTER) {
-      setStepIndex(index + 1);
-    }
+    // Note: With continuous=true, Joyride manages step progression automatically.
+    // We don't need to manually update stepIndex here.
   };
 
   return (
