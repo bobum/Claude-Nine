@@ -52,12 +52,19 @@ export default function Home() {
     if (!mounted) return;
 
     const completed = localStorage.getItem("claude-nine-tutorial-completed");
+    const enabled = localStorage.getItem("claude-nine-tutorial-enabled");
+
+    console.log("Tutorial debug:", { completed, enabled, mounted });
+
     if (!completed) {
       // Delay to ensure page is fully rendered
       const timer = setTimeout(() => {
+        console.log("Starting tutorial with steps:", homeTutorialSteps.length);
         startTutorial(homeTutorialSteps);
       }, 1500);
       return () => clearTimeout(timer);
+    } else {
+      console.log("Tutorial already completed, not starting");
     }
   }, [startTutorial, mounted]);
 
