@@ -102,7 +102,6 @@ export function TutorialProvider({ children }: TutorialProviderProps) {
         <Joyride
           steps={steps}
           run={run}
-          stepIndex={stepIndex}
           continuous
           showProgress
           showSkipButton
