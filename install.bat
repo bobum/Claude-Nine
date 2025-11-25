@@ -222,12 +222,16 @@ if not defined KEEP_EXISTING (
 
 REM Install Python dependencies
 echo.
+echo Upgrading pip to latest version...
+%PYTHON_CMD% -m pip install --upgrade pip >nul 2>&1
+
 echo Installing Python dependencies...
 %PIP_CMD% install -r requirements.txt > "%TEMP%\claude-nine-pip-install.log" 2>&1
 if %errorlevel% equ 0 (
     echo [OK] Python dependencies installed
 ) else (
     echo [WARNING] Some issues during pip install. Check %TEMP%\claude-nine-pip-install.log if problems occur.
+    echo [WARNING] If you see permission errors, try running as Administrator.
 )
 
 cd ..

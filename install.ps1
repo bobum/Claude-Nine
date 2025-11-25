@@ -279,6 +279,9 @@ LINEAR_API_KEY=$linearApiKey
 
 # Install Python dependencies
 Write-Host ""
+Write-Host "Upgrading pip to latest version..."
+& $pythonCmd -m pip install --upgrade pip > $null 2>&1
+
 Write-Host "Installing Python dependencies..."
 $pipLog = "$env:TEMP\claude-nine-pip-install.log"
 & $pipCmd install -r requirements.txt > $pipLog 2>&1
@@ -287,6 +290,7 @@ if ($LASTEXITCODE -eq 0) {
 }
 else {
     Write-Warning "Some issues during pip install. Check $pipLog if problems occur."
+    Write-Warning "If you see permission errors, try running PowerShell as Administrator."
 }
 
 Pop-Location
