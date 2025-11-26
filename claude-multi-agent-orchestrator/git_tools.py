@@ -7,7 +7,7 @@ for use by CrewAI agents.
 
 from typing import Type, Optional
 from pydantic import BaseModel, Field
-from crewai_tools import BaseTool
+from crewai.tools import BaseTool
 from git_operations import GitOperations
 import logging
 
@@ -30,10 +30,10 @@ class CreateBranchTool(BaseTool):
         "Input: branch_name (required), main_branch (optional, default='main')"
     )
     args_schema: Type[BaseModel] = CreateBranchInput
+    git_ops: GitOperations
 
-    def __init__(self, git_ops: GitOperations):
-        super().__init__()
-        self.git_ops = git_ops
+    def __init__(self, git_ops: GitOperations, **kwargs):
+        super().__init__(git_ops=git_ops, **kwargs)
 
     def _run(self, branch_name: str, main_branch: str = "main") -> str:
         """Create a new branch from main."""
@@ -58,10 +58,10 @@ class CommitChangesTool(BaseTool):
         "Input: message (required) - a descriptive commit message"
     )
     args_schema: Type[BaseModel] = CommitChangesInput
+    git_ops: GitOperations
 
-    def __init__(self, git_ops: GitOperations):
-        super().__init__()
-        self.git_ops = git_ops
+    def __init__(self, git_ops: GitOperations, **kwargs):
+        super().__init__(git_ops=git_ops, **kwargs)
 
     def _run(self, message: str) -> str:
         """Commit all changes with a message."""
@@ -91,10 +91,10 @@ class WriteFileTool(BaseTool):
         "content (required) - file content"
     )
     args_schema: Type[BaseModel] = WriteFileInput
+    git_ops: GitOperations
 
-    def __init__(self, git_ops: GitOperations):
-        super().__init__()
-        self.git_ops = git_ops
+    def __init__(self, git_ops: GitOperations, **kwargs):
+        super().__init__(git_ops=git_ops, **kwargs)
 
     def _run(self, file_path: str, content: str) -> str:
         """Write content to a file."""
@@ -120,10 +120,10 @@ class ReadFileTool(BaseTool):
         "branch (optional) - branch name to read from, None for current working directory"
     )
     args_schema: Type[BaseModel] = ReadFileInput
+    git_ops: GitOperations
 
-    def __init__(self, git_ops: GitOperations):
-        super().__init__()
-        self.git_ops = git_ops
+    def __init__(self, git_ops: GitOperations, **kwargs):
+        super().__init__(git_ops=git_ops, **kwargs)
 
     def _run(self, file_path: str, branch: Optional[str] = None) -> str:
         """Read content from a file."""
@@ -152,10 +152,10 @@ class CheckConflictsTool(BaseTool):
         "main_branch (optional, default='main') - target branch"
     )
     args_schema: Type[BaseModel] = CheckConflictsInput
+    git_ops: GitOperations
 
-    def __init__(self, git_ops: GitOperations):
-        super().__init__()
-        self.git_ops = git_ops
+    def __init__(self, git_ops: GitOperations, **kwargs):
+        super().__init__(git_ops=git_ops, **kwargs)
 
     def _run(self, branch_name: str, main_branch: str = "main") -> str:
         """Check for merge conflicts."""
@@ -190,10 +190,10 @@ class MergeBranchTool(BaseTool):
         "main_branch (optional, default='main') - target branch"
     )
     args_schema: Type[BaseModel] = MergeBranchInput
+    git_ops: GitOperations
 
-    def __init__(self, git_ops: GitOperations):
-        super().__init__()
-        self.git_ops = git_ops
+    def __init__(self, git_ops: GitOperations, **kwargs):
+        super().__init__(git_ops=git_ops, **kwargs)
 
     def _run(self, branch_name: str, main_branch: str = "main") -> str:
         """Merge a branch into main."""
@@ -220,10 +220,10 @@ class GetBranchesTool(BaseTool):
         "No input required."
     )
     args_schema: Type[BaseModel] = GetBranchesInput
+    git_ops: GitOperations
 
-    def __init__(self, git_ops: GitOperations):
-        super().__init__()
-        self.git_ops = git_ops
+    def __init__(self, git_ops: GitOperations, **kwargs):
+        super().__init__(git_ops=git_ops, **kwargs)
 
     def _run(self) -> str:
         """Get all branches."""
@@ -250,10 +250,10 @@ class GetRecentCommitsTool(BaseTool):
         "count (optional, default=5) - number of commits"
     )
     args_schema: Type[BaseModel] = GetRecentCommitsInput
+    git_ops: GitOperations
 
-    def __init__(self, git_ops: GitOperations):
-        super().__init__()
-        self.git_ops = git_ops
+    def __init__(self, git_ops: GitOperations, **kwargs):
+        super().__init__(git_ops=git_ops, **kwargs)
 
     def _run(self, branch: str, count: int = 5) -> str:
         """Get recent commits from a branch."""
@@ -277,10 +277,10 @@ class PushBranchTool(BaseTool):
         "Input: branch_name (required) - name of branch to push"
     )
     args_schema: Type[BaseModel] = PushBranchInput
+    git_ops: GitOperations
 
-    def __init__(self, git_ops: GitOperations):
-        super().__init__()
-        self.git_ops = git_ops
+    def __init__(self, git_ops: GitOperations, **kwargs):
+        super().__init__(git_ops=git_ops, **kwargs)
 
     def _run(self, branch_name: str) -> str:
         """Push a branch to remote."""
@@ -304,10 +304,10 @@ class GetCurrentBranchTool(BaseTool):
         "No input required."
     )
     args_schema: Type[BaseModel] = GetCurrentBranchInput
+    git_ops: GitOperations
 
-    def __init__(self, git_ops: GitOperations):
-        super().__init__()
-        self.git_ops = git_ops
+    def __init__(self, git_ops: GitOperations, **kwargs):
+        super().__init__(git_ops=git_ops, **kwargs)
 
     def _run(self) -> str:
         """Get current branch name."""

@@ -410,7 +410,7 @@ their branches in the shared repository. Focus on branch management and merging.
             crew = Crew(
                 agents=all_agents,
                 tasks=all_tasks,
-                process=Process.parallel,  # Run tasks in parallel
+                process=Process.sequential,  # Tasks marked async_execution=True will run in parallel
                 verbose=True
             )
 
