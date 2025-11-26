@@ -68,6 +68,8 @@ class Team(TeamBase):
 # Agent schemas
 class AgentBase(BaseModel):
     name: str
+    persona_type: str = "dev"  # dev, monitor, orchestrator
+    specialization: Optional[str] = None
     role: str
     goal: Optional[str] = None
 
@@ -79,6 +81,8 @@ class AgentCreate(AgentBase):
 class Agent(AgentBase):
     id: UUID4
     team_id: UUID4
+    persona_type: str
+    specialization: Optional[str] = None
     status: AgentStatus
     worktree_path: Optional[str] = None
     current_branch: Optional[str] = None

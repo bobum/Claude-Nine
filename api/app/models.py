@@ -74,6 +74,8 @@ class Agent(Base):
     id = Column(GUID(), primary_key=True, default=uuid.uuid4)
     team_id = Column(GUID(), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)
     name = Column(String(255), nullable=False)
+    persona_type = Column(String(50), default="dev")  # dev, monitor, orchestrator
+    specialization = Column(String(255))  # e.g., "Python/FastAPI", "Security"
     role = Column(String(255), nullable=False)
     goal = Column(Text)
     worktree_path = Column(String(500))
@@ -90,6 +92,7 @@ class Agent(Base):
     # Constraints
     __table_args__ = (
         CheckConstraint(status.in_(['idle', 'working', 'blocked', 'error']), name='agents_status_check'),
+        CheckConstraint(persona_type.in_(['dev', 'monitor', 'orchestrator']), name='agents_persona_type_check'),
     )
 
 

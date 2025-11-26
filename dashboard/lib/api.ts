@@ -100,6 +100,24 @@ export async function getTeamReadiness(id: string): Promise<TeamReadiness> {
   return response.json();
 }
 
+// Personas
+export interface Persona {
+  persona_type: string;
+  display_name: string;
+  role_template: string;
+  goal_template: string;
+  backstory_template: string;
+  icon: string;
+  max_per_team: number | null;
+  specializations: string[];
+}
+
+export async function getPersonas(): Promise<{ personas: Persona[] }> {
+  const response = await fetch(`${API_BASE_URL}/api/personas/`);
+  if (!response.ok) throw new Error("Failed to fetch personas");
+  return response.json();
+}
+
 export async function createTeam(data: {
   name: string;
   product: string;
@@ -158,7 +176,13 @@ export async function getAgents(teamId?: string): Promise<Agent[]> {
 
 export async function addAgentToTeam(
   teamId: string,
-  data: { name: string; role: string; goal?: string }
+  data: {
+    name: string;
+    persona_type: string;
+    specialization?: string;
+    role: string;
+    goal?: string;
+  }
 ): Promise<Agent> {
   const response = await fetch(`${API_BASE_URL}/api/teams/${teamId}/agents`, {
     method: "POST",
