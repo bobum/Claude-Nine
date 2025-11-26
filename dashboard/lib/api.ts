@@ -73,6 +73,33 @@ export async function getTeamFull(id: string): Promise<TeamWithWorkQueue> {
   return response.json();
 }
 
+export interface TeamReadiness {
+  team_id: string;
+  is_ready: boolean;
+  checks: {
+    has_agents: boolean;
+    has_repository: boolean;
+    repository_exists: boolean;
+    is_git_repository: boolean;
+    has_queued_work: boolean;
+  };
+  issues: string[];
+  agents_count: number;
+  queued_work_count: number;
+  queued_work_items: Array<{
+    id: string;
+    title: string;
+    status: string;
+    priority: number;
+  }>;
+}
+
+export async function getTeamReadiness(id: string): Promise<TeamReadiness> {
+  const response = await fetch(`${API_BASE_URL}/api/teams/${id}/readiness`);
+  if (!response.ok) throw new Error("Failed to fetch team readiness");
+  return response.json();
+}
+
 export async function createTeam(data: {
   name: string;
   product: string;

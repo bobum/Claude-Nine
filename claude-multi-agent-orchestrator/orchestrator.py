@@ -480,6 +480,11 @@ def main():
         action='store_true',
         help='Only clean up existing worktrees and exit'
     )
+    parser.add_argument(
+        '--team-id',
+        default=None,
+        help='Team ID for API integration (optional)'
+    )
 
     args = parser.parse_args()
 

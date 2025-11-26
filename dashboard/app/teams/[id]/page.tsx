@@ -5,12 +5,14 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   getTeamFull,
+  getTeamReadiness,
   startTeam,
   stopTeam,
   pauseTeam,
   deleteTeam,
   addAgentToTeam,
   type TeamWithWorkQueue,
+  type TeamReadiness,
 } from "@/lib/api";
 
 export default function TeamDetailPage() {
@@ -19,6 +21,7 @@ export default function TeamDetailPage() {
   const teamId = params.id as string;
 
   const [team, setTeam] = useState<TeamWithWorkQueue | null>(null);
+  const [readiness, setReadiness] = useState<TeamReadiness | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [showAddAgent, setShowAddAgent] = useState(false);
@@ -28,6 +31,11 @@ export default function TeamDetailPage() {
     try {
       const data = await getTeamFull(teamId);
       setTeam(data);
+
+      // Load readiness status
+      const readinessData = await getTeamReadiness(teamId);
+      setReadiness(readinessData);
+
       setLoading(false);
     } catch (error) {
       console.error("Failed to load team:", error);
@@ -47,7 +55,9 @@ export default function TeamDetailPage() {
   ) => {
     setActionLoading(true);
     try {
-      if (action === "start") await startTeam(teamId);
+      if (action === "start") {
+        await startTeam(teamId);
+      }
       else if (action === "stop") await stopTeam(teamId);
       else if (action === "pause") await pauseTeam(teamId);
       else if (action === "delete") {
@@ -205,6 +215,98 @@ export default function TeamDetailPage() {
             </span>
           </div>
         </div>
+
+        {/* Team Readiness Status */}
+        {readiness && !readiness.is_ready && (
+          <div className="bg-yellow-50 border-l-4 border-yellow-400 p-6 mb-6 rounded-lg">
+            <div className="flex items-start">
+              <div className="flex-shrink-0">
+                <svg
+                  className="h-6 w-6 text-yellow-400"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                  />
+                </svg>
+              </div>
+              <div className="ml-4 flex-1">
+                <h3 className="text-lg font-medium text-yellow-800 mb-2">
+                  Team Not Ready to Start
+                </h3>
+                <div className="text-sm text-yellow-700 space-y-2">
+                  <p className="font-medium">Issues to resolve:</p>
+                  <ul className="list-disc list-inside space-y-1">
+                    {readiness.issues.map((issue, idx) => (
+                      <li key={idx}>{issue}</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Execution Status Info */}
+        {team.status === "active" && readiness && (
+          <div className="bg-blue-50 border-l-4 border-blue-400 p-6 mb-6 rounded-lg">
+            <div className="flex items-start">
+              <div className="flex-shrink-0">
+                <svg
+                  className="h-6 w-6 text-blue-400"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                </svg>
+              </div>
+              <div className="ml-4 flex-1">
+                <h3 className="text-lg font-medium text-blue-800 mb-2">
+                  Team Marked as Active
+                </h3>
+                <div className="text-sm text-blue-700 space-y-2">
+                  <p>
+                    This team is configured and ready, but agent execution is
+                    not yet implemented in the UI.
+                  </p>
+                  <div className="bg-white p-3 rounded mt-3">
+                    <p className="font-medium mb-2">Ready to execute:</p>
+                    <ul className="space-y-1">
+                      <li>✅ {readiness.agents_count} agent(s) configured</li>
+                      <li>
+                        ✅ {readiness.queued_work_count} work item(s) queued
+                      </li>
+                      <li>⏳ Waiting for orchestrator integration</li>
+                    </ul>
+                  </div>
+                  {readiness.queued_work_items.length > 0 && (
+                    <div className="mt-3">
+                      <p className="font-medium mb-2">Queued work items:</p>
+                      <ul className="space-y-1">
+                        {readiness.queued_work_items.map((item) => (
+                          <li key={item.id} className="text-xs">
+                            • {item.title}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="grid md:grid-cols-2 gap-6">
           {/* Agents */}

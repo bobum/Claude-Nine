@@ -91,6 +91,80 @@ def update_team(
     return db_team
 
 
+@router.get("/{team_id}/readiness")
+def get_team_readiness(
+    team_id: UUID,
+    db: Session = Depends(get_db)
+):
+    """Check if team is ready to start and return detailed status"""
+    from ..models import WorkItem
+    import os
+
+    db_team = db.query(Team).filter(Team.id == team_id).first()
+    if not db_team:
+        raise HTTPException(status_code=404, detail="Team not found")
+
+    # Check all prerequisites
+    checks = {
+        "has_agents": bool(db_team.agents),
+        "has_repository": bool(db_team.repository_path),
+        "repository_exists": False,
+        "is_git_repository": False,
+        "has_queued_work": False
+    }
+
+    issues = []
+
+    # Check agents
+    if not checks["has_agents"]:
+        issues.append("No agents assigned to team")
+
+    # Check repository
+    if checks["has_repository"]:
+        if os.path.exists(db_team.repository_path):
+            checks["repository_exists"] = True
+            git_dir = os.path.join(db_team.repository_path, ".git")
+            if os.path.exists(git_dir):
+                checks["is_git_repository"] = True
+            else:
+                issues.append(f"'{db_team.repository_path}' is not a git repository")
+        else:
+            issues.append(f"Repository path '{db_team.repository_path}' does not exist")
+    else:
+        issues.append("No repository path configured")
+
+    # Check work items
+    queued_items = db.query(WorkItem).filter(
+        WorkItem.team_id == team_id,
+        WorkItem.status == "queued"
+    ).all()
+
+    checks["has_queued_work"] = len(queued_items) > 0
+    if not checks["has_queued_work"]:
+        issues.append("No work items in queue")
+
+    # Determine overall readiness
+    is_ready = all(checks.values())
+
+    return {
+        "team_id": str(team_id),
+        "is_ready": is_ready,
+        "checks": checks,
+        "issues": issues,
+        "agents_count": len(db_team.agents) if db_team.agents else 0,
+        "queued_work_count": len(queued_items),
+        "queued_work_items": [
+            {
+                "id": str(item.id),
+                "title": item.title,
+                "status": item.status,
+                "priority": item.priority
+            }
+            for item in queued_items
+        ]
+    }
+
+
 @router.delete("/{team_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_team(
     team_id: UUID,
@@ -116,12 +190,67 @@ def start_team(
     if not db_team:
         raise HTTPException(status_code=404, detail="Team not found")
 
+    # Validate prerequisites
+    if not db_team.agents:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot start team: No agents assigned to team"
+        )
+
+    # Check for queued work items
+    from ..models import WorkItem
+    queued_items = db.query(WorkItem).filter(
+        WorkItem.team_id == team_id,
+        WorkItem.status == "queued"
+    ).all()
+
+    if not queued_items:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot start team: No work items in queue. Please assign work items before starting."
+        )
+
+    # Validate repository path exists
+    import os
+    if not db_team.repository_path or not os.path.exists(db_team.repository_path):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot start team: Repository path '{db_team.repository_path}' does not exist or is not accessible"
+        )
+
+    # Check if it's a git repository
+    git_dir = os.path.join(db_team.repository_path, ".git")
+    if not os.path.exists(git_dir):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot start team: '{db_team.repository_path}' is not a git repository"
+        )
+
     db_team.status = "active"
     db.commit()
 
-    # TODO: Actually start the orchestrator for this team
+    # Start the orchestrator service
+    from ..services.orchestrator_service import get_orchestrator_service
+    orch_service = get_orchestrator_service()
 
-    return {"message": "Team started", "team_id": str(team_id)}
+    try:
+        result = orch_service.start_team(team_id, db)
+        return {
+            "message": "Team started successfully",
+            "team_id": str(team_id),
+            "agents_count": len(db_team.agents),
+            "queued_work_count": len(queued_items),
+            "orchestrator_status": result["status"],
+            "status": "active"
+        }
+    except Exception as e:
+        # Rollback team status if orchestrator fails to start
+        db_team.status = "stopped"
+        db.commit()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to start orchestrator: {str(e)}"
+        )
 
 
 @router.post("/{team_id}/stop")
@@ -134,12 +263,33 @@ def stop_team(
     if not db_team:
         raise HTTPException(status_code=404, detail="Team not found")
 
+    # Stop the orchestrator service
+    from ..services.orchestrator_service import get_orchestrator_service
+    orch_service = get_orchestrator_service()
+
+    result = orch_service.stop_team(team_id, db)
+
     db_team.status = "stopped"
     db.commit()
 
-    # TODO: Actually stop the orchestrator for this team
+    return {
+        "message": "Team stopped",
+        "team_id": str(team_id),
+        "orchestrator_status": result["status"]
+    }
 
-    return {"message": "Team stopped", "team_id": str(team_id)}
+
+@router.get("/{team_id}/orchestrator-status")
+def get_orchestrator_status(
+    team_id: UUID,
+    db: Session = Depends(get_db)
+):
+    """Get the status of the orchestrator for this team"""
+    from ..services.orchestrator_service import get_orchestrator_service
+    orch_service = get_orchestrator_service()
+
+    status = orch_service.get_status(team_id)
+    return status
 
 
 @router.post("/{team_id}/pause")
