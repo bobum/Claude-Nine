@@ -73,7 +73,7 @@ class AgentBase(BaseModel):
 
 
 class AgentCreate(AgentBase):
-    team_id: UUID4
+    pass
 
 
 class Agent(AgentBase):
