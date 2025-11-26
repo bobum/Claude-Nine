@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 from ..models import Team, Agent, WorkItem
 from ..database import SessionLocal
 from ..websocket import notify_agent_update, notify_work_item_update, notify_team_update
+from ..config import settings
 
 
 class OrchestratorService:
@@ -123,7 +124,7 @@ class OrchestratorService:
 
         # Set environment variables
         env = os.environ.copy()
-        env['ANTHROPIC_API_KEY'] = os.getenv('ANTHROPIC_API_KEY', '')
+        env['ANTHROPIC_API_KEY'] = settings.anthropic_api_key
 
         # Start the orchestrator process
         try:
@@ -385,6 +386,9 @@ class OrchestratorService:
     def _generate_config_yaml(self, team: Team) -> str:
         """Generate config.yaml for the orchestrator"""
         yaml_content = f"# Auto-generated config for team: {team.name}\n\n"
+        yaml_content += "# API Keys\n"
+        yaml_content += f"anthropic_api_key: {settings.anthropic_api_key}\n"
+        yaml_content += "\n"
         yaml_content += "# CrewAI Configuration\n"
         yaml_content += "crew:\n"
         yaml_content += "  process: parallel\n"

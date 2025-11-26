@@ -20,7 +20,7 @@ from typing import List, Dict, Any, Tuple
 from datetime import datetime
 from pathlib import Path
 
-from crewai import Agent, Task, Crew, Process
+from crewai import Agent, Task, Crew, Process, LLM
 from git_tools import create_git_tools
 from git_operations import GitOperations
 
@@ -80,6 +80,14 @@ class MultiAgentOrchestrator:
         # Set up API key
         if 'anthropic_api_key' in self.config and self.config['anthropic_api_key']:
             os.environ['ANTHROPIC_API_KEY'] = self.config['anthropic_api_key']
+            logger.info(f"Set ANTHROPIC_API_KEY from config: {self.config['anthropic_api_key'][:20]}...")
+        else:
+            logger.warning(f"No API key in config. Config keys: {list(self.config.keys())}")
+            # Check if it's in environment already
+            if os.getenv('ANTHROPIC_API_KEY'):
+                logger.info(f"ANTHROPIC_API_KEY found in environment: {os.getenv('ANTHROPIC_API_KEY')[:20]}...")
+            else:
+                logger.error("ANTHROPIC_API_KEY not found in config or environment!")
 
         # Register cleanup handler
         atexit.register(self.cleanup)
@@ -177,12 +185,19 @@ happen in your own workspace: {worktree_abs_path}
 Always make commits with descriptive messages. Work independently and focus on your feature.
 """
 
+            # Create LLM with explicit API key
+            llm = LLM(
+                model="anthropic/claude-sonnet-4-20250514",
+                api_key=os.getenv("ANTHROPIC_API_KEY"),
+                max_tokens=4096
+            )
+
             agent = Agent(
                 role=agent_role,
                 goal=agent_goal,
                 backstory=backstory,
                 tools=agent_git_tools,
-                llm="claude-sonnet-4-20250514",
+                llm=llm,
                 verbose=True,
                 allow_delegation=False
             )
@@ -240,12 +255,19 @@ branches in the shared repository. You don't need to worry about their working
 directories - just monitor and merge their branches.
 """
 
+        # Create LLM with explicit API key
+        llm = LLM(
+            model="anthropic/claude-sonnet-4-20250514",
+            api_key=os.getenv("ANTHROPIC_API_KEY"),
+            max_tokens=4096
+        )
+
         agent = Agent(
             role=monitor_role,
             goal=monitor_goal,
             backstory=backstory,
             tools=monitor_tools,
-            llm="claude-sonnet-4-20250514",
+            llm=llm,
             verbose=True,
             allow_delegation=False
         )
@@ -295,7 +317,7 @@ Work independently and don't worry about other developers - you have your own wo
             description=task_description,
             agent=agent,
             expected_output=expected_output,
-            async_execution=True  # Enable parallel execution
+            async_execution=False  # Sequential execution for feature tasks
         )
 
         logger.info(f"Created task for feature: {feature_config['name']} on branch {branch_name}")
@@ -351,7 +373,7 @@ their branches in the shared repository. Focus on branch management and merging.
             description=task_description,
             agent=agent,
             expected_output="All features monitored and conflicts resolved",
-            async_execution=True
+            async_execution=False  # Monitor runs after feature tasks complete
         )
 
         logger.info("Created monitoring task")
