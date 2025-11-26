@@ -317,10 +317,17 @@ def add_agent_to_team(
     db: Session = Depends(get_db)
 ):
     """Add an agent to a team"""
+    from ..personas import get_persona, validate_persona_for_team
+
     # Verify team exists
     db_team = db.query(Team).filter(Team.id == team_id).first()
     if not db_team:
         raise HTTPException(status_code=404, detail="Team not found")
+
+    # Validate persona type and team limits
+    is_valid, error_msg = validate_persona_for_team(agent.persona_type, db_team.agents)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=error_msg)
 
     # Check if agent name already exists in team
     existing = db.query(Agent).filter(
@@ -330,7 +337,22 @@ def add_agent_to_team(
     if existing:
         raise HTTPException(status_code=400, detail="Agent name already exists in this team")
 
-    db_agent = Agent(team_id=team_id, **agent.dict(exclude={'team_id'}))
+    # Get persona template and auto-fill role/goal if not provided
+    persona = get_persona(agent.persona_type)
+    if persona:
+        agent_dict = agent.dict(exclude={'team_id'})
+
+        # Use persona template if role not customized
+        if not agent_dict.get('role') or agent_dict['role'] == persona.role_template:
+            agent_dict['role'] = persona.get_role(agent_dict.get('specialization'))
+
+        # Use persona template if goal not customized
+        if not agent_dict.get('goal') or agent_dict['goal'] == persona.goal_template:
+            agent_dict['goal'] = persona.get_goal()
+    else:
+        agent_dict = agent.dict(exclude={'team_id'})
+
+    db_agent = Agent(team_id=team_id, **agent_dict)
     db.add(db_agent)
     db.commit()
     db.refresh(db_agent)
