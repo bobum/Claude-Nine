@@ -31,7 +31,7 @@ export default function NewTeamPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       {/* Header */}
       <header className="bg-gray-900 text-white py-4 px-6 shadow-md">
         <div className="max-w-7xl mx-auto flex justify-between items-center">
@@ -51,13 +51,13 @@ export default function NewTeamPage() {
 
       {/* Main Content */}
       <main className="max-w-3xl mx-auto py-8 px-6">
-        <div className="bg-white rounded-lg shadow p-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-6">
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-8">
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-6">
             Create New Team
           </h1>
 
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-6">
+            <div className="bg-red-50 dark:bg-red-900 border border-red-200 dark:border-red-700 text-red-700 dark:text-red-200 px-4 py-3 rounded mb-6">
               {error}
             </div>
           )}
@@ -68,7 +68,7 @@ export default function NewTeamPage() {
               <div>
                 <label
                   htmlFor="name"
-                  className="block text-sm font-medium text-gray-700 mb-2"
+                  className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
                 >
                   Team Name *
                 </label>
@@ -80,7 +80,7 @@ export default function NewTeamPage() {
                   onChange={(e) =>
                     setFormData({ ...formData, name: e.target.value })
                   }
-                  className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
                   placeholder="e.g., E-Commerce Team"
                 />
               </div>
@@ -89,7 +89,7 @@ export default function NewTeamPage() {
               <div>
                 <label
                   htmlFor="product"
-                  className="block text-sm font-medium text-gray-700 mb-2"
+                  className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
                 >
                   Product Name *
                 </label>
@@ -101,7 +101,7 @@ export default function NewTeamPage() {
                   onChange={(e) =>
                     setFormData({ ...formData, product: e.target.value })
                   }
-                  className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
                   placeholder="e.g., ShopifyClone"
                 />
               </div>
@@ -110,7 +110,7 @@ export default function NewTeamPage() {
               <div>
                 <label
                   htmlFor="repo_path"
-                  className="block text-sm font-medium text-gray-700 mb-2"
+                  className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
                 >
                   Repository Path *
                 </label>
@@ -122,10 +122,10 @@ export default function NewTeamPage() {
                   onChange={(e) =>
                     setFormData({ ...formData, repo_path: e.target.value })
                   }
-                  className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
                   placeholder="e.g., /repos/shopify-clone"
                 />
-                <p className="mt-1 text-sm text-gray-500">
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
                   Absolute path to the repository directory
                 </p>
               </div>
@@ -134,7 +134,7 @@ export default function NewTeamPage() {
               <div>
                 <label
                   htmlFor="main_branch"
-                  className="block text-sm font-medium text-gray-700 mb-2"
+                  className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
                 >
                   Main Branch
                 </label>
@@ -145,7 +145,7 @@ export default function NewTeamPage() {
                   onChange={(e) =>
                     setFormData({ ...formData, main_branch: e.target.value })
                   }
-                  className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
                   placeholder="main"
                 />
               </div>
@@ -156,13 +156,13 @@ export default function NewTeamPage() {
               <button
                 type="submit"
                 disabled={loading}
-                className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-6 py-3 rounded-md font-medium"
+                className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-6 py-3 rounded-lg font-medium"
               >
                 {loading ? "Creating..." : "Create Team"}
               </button>
               <Link
                 href="/teams"
-                className="flex-1 text-center bg-gray-200 hover:bg-gray-300 text-gray-700 px-6 py-3 rounded-md font-medium"
+                className="flex-1 text-center bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 px-6 py-3 rounded-lg font-medium"
               >
                 Cancel
               </Link>
