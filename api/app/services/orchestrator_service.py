@@ -129,7 +129,7 @@ class OrchestratorService:
         try:
             process = subprocess.Popen(
                 cmd,
-                cwd=team.repository_path,
+                cwd=team.repo_path,
                 env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,

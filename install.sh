@@ -2,6 +2,7 @@
 
 # Claude-Nine Local Installation Script
 # This script sets up Claude-Nine to run entirely on your local machine
+# Now with Python 3.13 virtual environment support
 
 set -e  # Exit on error
 
@@ -40,43 +41,43 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
-# Function to get version
-get_version() {
-    local cmd=$1
-    local version_flag=${2:---version}
-    $cmd $version_flag 2>&1 | head -n1
-}
-
-echo -e "${BLUE}[1/6] Checking Prerequisites...${NC}"
+echo -e "${BLUE}[1/7] Checking Prerequisites...${NC}"
 echo ""
 
-# Check Python - Try to actually run it, not just check if it exists
+# Check for Python 3.13 specifically (required for CrewAI)
 PYTHON_CMD=""
-if python --version >/dev/null 2>&1; then
-    PYTHON_VERSION=$(python --version 2>&1 | awk '{print $2}')
-    echo -e "${GREEN}✓${NC} Python found: $PYTHON_VERSION"
-    PYTHON_CMD=python
-elif python3 --version >/dev/null 2>&1; then
-    PYTHON_VERSION=$(python3 --version 2>&1 | awk '{print $2}')
-    echo -e "${GREEN}✓${NC} Python 3 found: $PYTHON_VERSION"
-    PYTHON_CMD=python3
-else
-    echo -e "${RED}✗ Python 3.12+ is required but not found${NC}"
-    echo "  Please install Python from https://www.python.org/downloads/"
-    exit 1
-fi
+PYTHON_VERSION=""
 
-# Check pip - Try to actually run it, not just check if it exists
-PIP_CMD=""
-if pip --version >/dev/null 2>&1; then
-    echo -e "${GREEN}✓${NC} pip found"
-    PIP_CMD=pip
-elif pip3 --version >/dev/null 2>&1; then
-    echo -e "${GREEN}✓${NC} pip3 found"
-    PIP_CMD=pip3
+# Try py -3.13 first (Windows Python Launcher)
+if command_exists py && py -3.13 --version >/dev/null 2>&1; then
+    PYTHON_VERSION=$(py -3.13 --version 2>&1 | awk '{print $2}')
+    PYTHON_CMD="py -3.13"
+    echo -e "${GREEN}✓${NC} Python 3.13 found via py launcher: $PYTHON_VERSION"
+# Try python3.13
+elif python3.13 --version >/dev/null 2>&1; then
+    PYTHON_VERSION=$(python3.13 --version 2>&1 | awk '{print $2}')
+    PYTHON_CMD=python3.13
+    echo -e "${GREEN}✓${NC} Python 3.13 found: $PYTHON_VERSION"
+# Check if default python is 3.13
+elif python --version 2>&1 | grep -q "3.13"; then
+    PYTHON_VERSION=$(python --version 2>&1 | awk '{print $2}')
+    PYTHON_CMD=python
+    echo -e "${GREEN}✓${NC} Python 3.13 found: $PYTHON_VERSION"
+elif python3 --version 2>&1 | grep -q "3.13"; then
+    PYTHON_VERSION=$(python3 --version 2>&1 | awk '{print $2}')
+    PYTHON_CMD=python3
+    echo -e "${GREEN}✓${NC} Python 3.13 found: $PYTHON_VERSION"
 else
-    echo -e "${RED}✗ pip is required but not found${NC}"
-    echo "  Please install pip"
+    echo -e "${RED}✗ Python 3.13 is required but not found${NC}"
+    echo ""
+    echo "  CrewAI (used by the orchestrator) requires Python 3.10-3.13"
+    echo "  Python 3.14 is too new and not yet supported."
+    echo ""
+    echo "  Please install Python 3.13 from:"
+    echo "  https://www.python.org/downloads/release/python-3130/"
+    echo ""
+    echo "  You can install it alongside your current Python version."
+    echo ""
     exit 1
 fi
 
@@ -111,8 +112,50 @@ echo ""
 echo -e "${GREEN}All prerequisites met!${NC}"
 echo ""
 
+# Create virtual environment
+echo -e "${BLUE}[2/7] Creating Python Virtual Environment...${NC}"
+echo ""
+
+VENV_DIR="venv"
+
+if [ -d "$VENV_DIR" ]; then
+    echo -e "${YELLOW}Virtual environment already exists at $VENV_DIR${NC}"
+    read -p "Do you want to recreate it? (y/n): " RECREATE_VENV
+    if [[ $RECREATE_VENV =~ ^[Yy]$ ]]; then
+        echo "Removing existing virtual environment..."
+        rm -rf "$VENV_DIR"
+    else
+        echo "Using existing virtual environment"
+    fi
+fi
+
+if [ ! -d "$VENV_DIR" ]; then
+    echo "Creating virtual environment with Python 3.13..."
+    $PYTHON_CMD -m venv "$VENV_DIR"
+    echo -e "${GREEN}✓${NC} Virtual environment created at $VENV_DIR"
+else
+    echo -e "${GREEN}✓${NC} Using existing virtual environment"
+fi
+
+# Activate virtual environment
+echo ""
+echo "Activating virtual environment..."
+if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" ]]; then
+    # Git Bash on Windows
+    source "$VENV_DIR/Scripts/activate"
+else
+    # Linux/Mac
+    source "$VENV_DIR/bin/activate"
+fi
+
+# Verify we're using the venv Python
+VENV_PYTHON=$(which python)
+echo -e "${GREEN}✓${NC} Using Python from: $VENV_PYTHON"
+
+echo ""
+
 # Get API Keys and Integration Credentials
-echo -e "${BLUE}[2/6] Configuring API Keys & Integrations...${NC}"
+echo -e "${BLUE}[3/7] Configuring API Keys & Integrations...${NC}"
 echo ""
 echo "Claude-Nine uses Anthropic's Claude AI for intelligent agents."
 echo "You'll need an API key from: https://console.anthropic.com/settings/keys"
@@ -173,7 +216,7 @@ read -p "Linear API key: " LINEAR_API_KEY
 echo ""
 
 # Set up API
-echo -e "${BLUE}[3/6] Setting Up API Server...${NC}"
+echo -e "${BLUE}[4/7] Setting Up API Server...${NC}"
 echo ""
 
 cd api
@@ -222,16 +265,37 @@ EOF
 
 echo -e "${GREEN}✓${NC} Configuration file created: api/.env"
 
-# Install Python dependencies
+# Install Python dependencies for API
 echo ""
 echo "Upgrading pip to latest version..."
-$PYTHON_CMD -m pip install --upgrade pip >/dev/null 2>&1
+python -m pip install --upgrade pip --quiet
 
-echo "Installing Python dependencies..."
-if $PIP_CMD install -r requirements.txt > /tmp/claude-nine-pip-install.log 2>&1; then
-    echo -e "${GREEN}✓${NC} Python dependencies installed"
+echo "Installing API dependencies..."
+if pip install -r requirements.txt --quiet; then
+    echo -e "${GREEN}✓${NC} API dependencies installed"
 else
-    echo -e "${YELLOW}⚠${NC} Some issues during pip install. Check /tmp/claude-nine-pip-install.log if problems occur."
+    echo -e "${RED}✗${NC} Failed to install API dependencies"
+    exit 1
+fi
+
+cd ..
+
+echo ""
+
+# Install orchestrator dependencies
+echo -e "${BLUE}[5/7] Setting Up Orchestrator...${NC}"
+echo ""
+
+cd claude-multi-agent-orchestrator
+
+echo "Installing orchestrator dependencies (CrewAI, GitPython, etc.)..."
+if pip install -r requirements.txt --quiet; then
+    echo -e "${GREEN}✓${NC} Orchestrator dependencies installed"
+else
+    echo -e "${RED}✗${NC} Failed to install orchestrator dependencies"
+    echo "This may be due to Python version compatibility."
+    echo "Please ensure you're using Python 3.10-3.13"
+    exit 1
 fi
 
 cd ..
@@ -239,13 +303,13 @@ cd ..
 echo ""
 
 # Set up Dashboard
-echo -e "${BLUE}[4/6] Setting Up Dashboard...${NC}"
+echo -e "${BLUE}[6/7] Setting Up Dashboard...${NC}"
 echo ""
 
 cd dashboard
 
 echo "Installing Node.js dependencies (this may take a few minutes)..."
-if npm install > /tmp/claude-nine-npm-install.log 2>&1; then
+if npm install --quiet > /tmp/claude-nine-npm-install.log 2>&1; then
     echo -e "${GREEN}✓${NC} Node.js dependencies installed"
 else
     echo -e "${RED}✗${NC} npm install failed. Check /tmp/claude-nine-npm-install.log for details."
@@ -257,8 +321,15 @@ cd ..
 echo ""
 
 # Create helper scripts
-echo -e "${BLUE}[5/6] Creating Helper Scripts...${NC}"
+echo -e "${BLUE}[7/7] Creating Helper Scripts...${NC}"
 echo ""
+
+# Determine activation command based on OS
+if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" ]]; then
+    ACTIVATE_CMD="source venv/Scripts/activate"
+else
+    ACTIVATE_CMD="source venv/bin/activate"
+fi
 
 # Create start script
 cat > start.sh << EOF
@@ -275,13 +346,17 @@ NC='\033[0m' # No Color
 echo -e "\${GREEN}Starting Claude-Nine...\${NC}"
 echo ""
 
+# Activate virtual environment
+echo "Activating Python virtual environment..."
+$ACTIVATE_CMD
+
 # Create logs directory
 mkdir -p logs
 
 # Start API in background with logging
 echo "Starting API server on http://localhost:8000..."
 cd api
-$PYTHON_CMD -m uvicorn app.main:app --host 0.0.0.0 --port 8000 > ../logs/api.log 2>&1 &
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 > ../logs/api.log 2>&1 &
 API_PID=\$!
 cd ..
 
@@ -365,9 +440,35 @@ EOF
 chmod +x start.sh
 echo -e "${GREEN}✓${NC} Created start.sh - Run Claude-Nine with: ./start.sh"
 
-# Create or update .gitignore for logs
+# Create activation helper script
+cat > activate.sh << EOF
+#!/bin/bash
+
+# Activate the Claude-Nine Python virtual environment
+
+echo "Activating Claude-Nine virtual environment..."
+$ACTIVATE_CMD
+
+echo ""
+echo -e "\033[0;32m✓ Virtual environment activated\033[0m"
+echo ""
+echo "You can now run Python commands using the venv Python 3.13:"
+echo "  python --version"
+echo "  pip list"
+echo ""
+echo "To deactivate, type: deactivate"
+echo ""
+EOF
+
+chmod +x activate.sh
+echo -e "${GREEN}✓${NC} Created activate.sh - Activate venv with: source activate.sh"
+
+# Create or update .gitignore for logs and venv
 if ! grep -q "^logs/$" .gitignore 2>/dev/null; then
     echo "logs/" >> .gitignore
+fi
+if ! grep -q "^venv/$" .gitignore 2>/dev/null; then
+    echo "venv/" >> .gitignore
 fi
 
 # Create stop script
@@ -420,20 +521,23 @@ echo -e "${GREEN}✓${NC} Created stop.sh - Stop Claude-Nine with: ./stop.sh"
 echo ""
 
 # Create README for user
-echo -e "${BLUE}[6/6] Finalizing Installation...${NC}"
-echo ""
-
 cat > GETTING_STARTED.md << 'EOF'
 # Getting Started with Claude-Nine
 
 ## Quick Start
+
+### Activate Virtual Environment (Optional)
+Claude-Nine uses a Python 3.13 virtual environment to ensure compatibility:
+```bash
+source activate.sh
+```
 
 ### Start Claude-Nine
 ```bash
 ./start.sh
 ```
 
-This starts both the API server and dashboard. Open http://localhost:3000 in your browser.
+This automatically activates the venv, starts both the API server and dashboard. Open http://localhost:3000 in your browser.
 
 ### Stop Claude-Nine
 ```bash
@@ -447,6 +551,26 @@ Or press `Ctrl+C` in the terminal where you ran `./start.sh`.
 - **Dashboard**: http://localhost:3000 - Your main UI
 - **API**: http://localhost:8000 - Backend server
 - **API Docs**: http://localhost:8000/docs - Interactive API documentation
+
+## Virtual Environment
+
+This installation uses a Python 3.13 virtual environment located in `venv/`.
+
+Benefits:
+- Isolated from your system Python
+- Uses Python 3.13 (required for CrewAI compatibility)
+- All dependencies installed separately from your global Python
+
+To manually activate:
+```bash
+source venv/bin/activate  # Linux/Mac
+source venv/Scripts/activate  # Git Bash on Windows
+```
+
+To deactivate:
+```bash
+deactivate
+```
 
 ## First Steps
 
@@ -502,6 +626,12 @@ npm install
 cd ..
 ```
 
+### Python Version Issues
+This installation requires Python 3.13 for CrewAI compatibility. If you see import errors:
+1. Verify you're using the venv: `source activate.sh`
+2. Check Python version: `python --version` (should be 3.13.x)
+3. Reinstall dependencies: `pip install -r api/requirements.txt -r claude-multi-agent-orchestrator/requirements.txt`
+
 ## Documentation
 
 - **Full Guide**: See `docs/local-setup-guide.md`
@@ -512,14 +642,17 @@ cd ..
 
 ```
 Claude-Nine/
+├── venv/                   # Python 3.13 virtual environment
 ├── api/                    # Backend (FastAPI)
 │   ├── claude_nine.db      # Your local database
 │   ├── .env                # Configuration (API keys)
 │   └── app/                # API code
 ├── dashboard/              # Frontend (Next.js)
 │   └── app/                # Dashboard pages
+├── claude-multi-agent-orchestrator/  # CrewAI orchestrator
 ├── start.sh                # Start Claude-Nine
 ├── stop.sh                 # Stop Claude-Nine
+├── activate.sh             # Activate Python venv
 └── GETTING_STARTED.md      # This file
 ```
 
@@ -558,6 +691,7 @@ echo -e "${BLUE}Additional Information:${NC}"
 echo ""
 echo "  📖 Quick Guide: GETTING_STARTED.md"
 echo "  🛑 Stop Server: ./stop.sh"
+echo "  🐍 Activate venv: source activate.sh"
 echo "  📚 Full Docs: docs/"
 echo "  🔧 API Docs: http://localhost:8000/docs (when running)"
 echo ""

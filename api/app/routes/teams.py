@@ -107,7 +107,7 @@ def get_team_readiness(
     # Check all prerequisites
     checks = {
         "has_agents": bool(db_team.agents),
-        "has_repository": bool(db_team.repository_path),
+        "has_repository": bool(db_team.repo_path),
         "repository_exists": False,
         "is_git_repository": False,
         "has_queued_work": False
@@ -121,15 +121,15 @@ def get_team_readiness(
 
     # Check repository
     if checks["has_repository"]:
-        if os.path.exists(db_team.repository_path):
+        if os.path.exists(db_team.repo_path):
             checks["repository_exists"] = True
-            git_dir = os.path.join(db_team.repository_path, ".git")
+            git_dir = os.path.join(db_team.repo_path, ".git")
             if os.path.exists(git_dir):
                 checks["is_git_repository"] = True
             else:
-                issues.append(f"'{db_team.repository_path}' is not a git repository")
+                issues.append(f"'{db_team.repo_path}' is not a git repository")
         else:
-            issues.append(f"Repository path '{db_team.repository_path}' does not exist")
+            issues.append(f"Repository path '{db_team.repo_path}' does not exist")
     else:
         issues.append("No repository path configured")
 
@@ -212,18 +212,18 @@ def start_team(
 
     # Validate repository path exists
     import os
-    if not db_team.repository_path or not os.path.exists(db_team.repository_path):
+    if not db_team.repo_path or not os.path.exists(db_team.repo_path):
         raise HTTPException(
             status_code=400,
-            detail=f"Cannot start team: Repository path '{db_team.repository_path}' does not exist or is not accessible"
+            detail=f"Cannot start team: Repository path '{db_team.repo_path}' does not exist or is not accessible"
         )
 
     # Check if it's a git repository
-    git_dir = os.path.join(db_team.repository_path, ".git")
+    git_dir = os.path.join(db_team.repo_path, ".git")
     if not os.path.exists(git_dir):
         raise HTTPException(
             status_code=400,
-            detail=f"Cannot start team: '{db_team.repository_path}' is not a git repository"
+            detail=f"Cannot start team: '{db_team.repo_path}' is not a git repository"
         )
 
     db_team.status = "active"
