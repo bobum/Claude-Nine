@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from ..models import Team, Agent, WorkItem
 from ..database import SessionLocal
+from ..websocket import notify_agent_update, notify_work_item_update, notify_team_update
 
 
 class OrchestratorService:
@@ -157,13 +158,34 @@ class OrchestratorService:
             for work_item in work_items:
                 work_item.status = "in_progress"
                 work_item.started_at = datetime.utcnow()
+                # Send WebSocket notification
+                notify_work_item_update(
+                    str(work_item.id),
+                    str(team_id),
+                    "status_changed",
+                    {"status": "in_progress", "started_at": work_item.started_at.isoformat()}
+                )
 
             # Update agents to working status
             for agent in team.agents:
                 agent.status = "working"
                 agent.last_activity = datetime.utcnow()
+                # Send WebSocket notification
+                notify_agent_update(
+                    str(agent.id),
+                    str(team_id),
+                    "status_changed",
+                    {"status": "working", "last_activity": agent.last_activity.isoformat()}
+                )
 
             db.commit()
+
+            # Send team update notification
+            notify_team_update(
+                str(team_id),
+                "orchestrator_started",
+                {"message": f"Orchestrator started with {len(work_items)} work items"}
+            )
 
             return {
                 "status": "started",
@@ -271,6 +293,13 @@ class OrchestratorService:
                 for agent in team.agents:
                     agent.status = "idle"
                     agent.last_activity = datetime.utcnow()
+                    # Send WebSocket notification
+                    notify_agent_update(
+                        str(agent.id),
+                        team_id_str,
+                        "status_changed",
+                        {"status": "idle", "last_activity": agent.last_activity.isoformat()}
+                    )
 
                 # Update work items based on process result
                 if process.returncode == 0:
@@ -282,6 +311,13 @@ class OrchestratorService:
                     for work_item in work_items:
                         work_item.status = "completed"
                         work_item.completed_at = datetime.utcnow()
+                        # Send WebSocket notification
+                        notify_work_item_update(
+                            str(work_item.id),
+                            team_id_str,
+                            "status_changed",
+                            {"status": "completed", "completed_at": work_item.completed_at.isoformat()}
+                        )
                 else:
                     # Error - mark as queued again
                     work_items = db.query(WorkItem).filter(
@@ -291,8 +327,23 @@ class OrchestratorService:
                     for work_item in work_items:
                         work_item.status = "queued"
                         work_item.started_at = None
+                        # Send WebSocket notification
+                        notify_work_item_update(
+                            str(work_item.id),
+                            team_id_str,
+                            "status_changed",
+                            {"status": "queued", "error": "Orchestrator failed"}
+                        )
 
                 db.commit()
+
+                # Send team update notification
+                status_msg = "completed successfully" if process.returncode == 0 else "failed"
+                notify_team_update(
+                    team_id_str,
+                    "orchestrator_stopped",
+                    {"message": f"Orchestrator {status_msg}", "return_code": process.returncode}
+                )
         finally:
             db.close()
 
