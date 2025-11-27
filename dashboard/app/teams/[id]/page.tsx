@@ -13,7 +13,10 @@ import {
   addAgentToTeam,
   type TeamWithWorkQueue,
   type TeamReadiness,
+  type AgentTelemetry,
 } from "@/lib/api";
+import { useWebSocket } from "@/lib/hooks";
+import AgentTelemetryCard from "@/components/AgentTelemetryCard";
 
 export default function TeamDetailPage() {
   const params = useParams();
@@ -26,6 +29,11 @@ export default function TeamDetailPage() {
   const [actionLoading, setActionLoading] = useState(false);
   const [showAddAgent, setShowAddAgent] = useState(false);
   const [newAgent, setNewAgent] = useState({ name: "", role: "", goal: "" });
+  const [agentTelemetry, setAgentTelemetry] = useState<Record<string, AgentTelemetry>>({});
+
+  // WebSocket connection for real-time telemetry
+  const wsUrl = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000/ws";
+  const { lastMessage, isConnected } = useWebSocket(wsUrl);
 
   const loadTeam = async () => {
     try {
@@ -49,6 +57,22 @@ export default function TeamDetailPage() {
     const interval = setInterval(loadTeam, 5000);
     return () => clearInterval(interval);
   }, [teamId]);
+
+  // Handle WebSocket messages for telemetry updates
+  useEffect(() => {
+    if (lastMessage) {
+      const message = lastMessage;
+
+      // Check if this is a telemetry update for an agent in this team
+      if (message.type === "agent_telemetry" && message.team_id === teamId) {
+        const telemetryData = message.data as AgentTelemetry;
+        setAgentTelemetry((prev) => ({
+          ...prev,
+          [telemetryData.agent_name]: telemetryData,
+        }));
+      }
+    }
+  }, [lastMessage, teamId]);
 
   const handleAction = async (
     action: "start" | "stop" | "pause" | "delete"
@@ -308,11 +332,41 @@ export default function TeamDetailPage() {
           </div>
         )}
 
+        {/* Agent Telemetry Grid */}
+        {team.status === "active" && team.agents.length > 0 && (
+          <div className="mb-6">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-2xl font-semibold text-gray-900 dark:text-gray-100">
+                Agent Telemetry
+              </h2>
+              <div className="flex items-center gap-2">
+                <div
+                  className={`w-3 h-3 rounded-full ${
+                    isConnected ? "bg-green-500" : "bg-red-500"
+                  }`}
+                ></div>
+                <span className="text-sm text-gray-600 dark:text-gray-400">
+                  {isConnected ? "Connected" : "Disconnected"}
+                </span>
+              </div>
+            </div>
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {team.agents.map((agent) => (
+                <AgentTelemetryCard
+                  key={agent.id}
+                  agent={agent}
+                  telemetry={agentTelemetry[agent.name] || null}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="grid md:grid-cols-2 gap-6">
           {/* Agents */}
-          <div className="bg-white rounded-lg shadow p-6">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
             <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-semibold">
+              <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
                 Agents ({team.agents.length})
               </h2>
               <button

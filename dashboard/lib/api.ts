@@ -258,3 +258,46 @@ export async function bulkAssignWorkItems(
   if (!response.ok) throw new Error("Failed to bulk assign work items");
   return response.json();
 }
+
+// Telemetry Types
+export interface ProcessMetrics {
+  pid: number;
+  cpu_percent: number;
+  memory_mb: number;
+  threads: number;
+  status: string;
+}
+
+export interface GitActivity {
+  operation: string;
+  branch?: string | null;
+  message?: string | null;
+  files_changed?: number | null;
+  timestamp?: string | null;
+  agent_name?: string | null;
+}
+
+export interface TokenUsage {
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  cost_usd: number;
+}
+
+export interface ActivityLog {
+  timestamp: string;
+  level: string;
+  message: string;
+  source: string;
+  agent_name?: string | null;
+}
+
+export interface AgentTelemetry {
+  agent_name: string;
+  process_metrics: ProcessMetrics;
+  token_usage: TokenUsage;
+  git_activities: GitActivity[];
+  activity_logs: ActivityLog[];
+  timestamp: string;
+}
