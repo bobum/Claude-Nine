@@ -17,13 +17,14 @@ import logging
 import signal
 import atexit
 import requests
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 from datetime import datetime
 from pathlib import Path
 
 from crewai import Agent, Task, Crew, Process, LLM
 from git_tools import create_git_tools
 from git_operations import GitOperations
+from telemetry_collector import TelemetryCollector
 
 
 # Configure logging
@@ -50,13 +51,14 @@ class MultiAgentOrchestrator:
     - Automatic cleanup of worktrees on shutdown
     """
 
-    def __init__(self, config_path: str = "config.yaml", tasks_path: str = "tasks/example_tasks.yaml"):
+    def __init__(self, config_path: str = "config.yaml", tasks_path: str = "tasks/example_tasks.yaml", team_id: str = None):
         """
         Initialize the orchestrator.
 
         Args:
             config_path: Path to configuration file
             tasks_path: Path to tasks definition file
+            team_id: Team ID for API integration (optional)
         """
         self.config = self._load_config(config_path)
         self.tasks_config = self._load_tasks(tasks_path)
@@ -77,6 +79,10 @@ class MultiAgentOrchestrator:
         # Track worktrees for cleanup
         self.worktrees: List[str] = []
         self.running = True
+
+        # Telemetry
+        self.team_id = team_id
+        self.telemetry_collector: Optional[TelemetryCollector] = None
 
         # Set up API key
         if 'anthropic_api_key' in self.config and self.config['anthropic_api_key']:
