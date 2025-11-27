@@ -147,7 +147,7 @@ class MultiAgentOrchestrator:
             }
 
     def _load_tasks(self, tasks_path: str) -> List[Dict[str, Any]]:
-        """Load tasks from YAML file."""
+        """Load tasks from YAML file. Returns empty list on error to keep orchestrator alive."""
         try:
             with open(tasks_path, 'r', encoding='utf-8') as f:
                 tasks_data = yaml.safe_load(f)
@@ -160,11 +160,13 @@ class MultiAgentOrchestrator:
             logger.info(f"Loaded {len(tasks)} tasks from {tasks_path}")
             return tasks
         except FileNotFoundError:
-            logger.error(f"Tasks file {tasks_path} not found")
-            raise
+            logger.error(f"[RESILIENT] Tasks file {tasks_path} not found - orchestrator will wait for tasks")
+            # Return empty list instead of crashing - orchestrator stays alive
+            return []
         except Exception as e:
-            logger.error(f"Error loading tasks: {e}")
-            raise
+            logger.error(f"[RESILIENT] Error loading tasks: {e} - orchestrator will continue with empty task list", exc_info=True)
+            # Return empty list instead of crashing - orchestrator stays alive
+            return []
 
     def create_feature_agent(self, feature_config: Dict[str, Any]) -> Tuple[Agent, str]:
         """
@@ -238,8 +240,9 @@ Always make commits with descriptive messages. Work independently and focus on y
             return agent, worktree_abs_path
 
         except Exception as e:
-            logger.error(f"Failed to create agent for {agent_name}: {e}")
-            raise
+            logger.error(f"[RESILIENT] Failed to create agent for {agent_name}: {e} - skipping this agent", exc_info=True)
+            # Don't crash - return None to skip this agent
+            return None, None
 
     def create_monitor_agent(self) -> Agent:
         """
@@ -448,8 +451,23 @@ their branches in the shared repository. Focus on branch management and merging.
             feature_tasks = []
             worktree_paths = []
 
+            # Check if we have tasks to process
+            if not self.tasks_config:
+                logger.warning("[RESILIENT] No tasks loaded - orchestrator will stay alive but idle")
+                logger.info("Waiting for tasks to be added...")
+                # Keep orchestrator alive but don't crash
+                import time
+                while self.running:
+                    time.sleep(10)
+                    logger.info("[RESILIENT] Still waiting for tasks...")
+                return None
+
             for feature_config in self.tasks_config:
                 agent, worktree_path = self.create_feature_agent(feature_config)
+                # Skip agents that failed to create
+                if agent is None:
+                    logger.warning(f"[RESILIENT] Skipping agent for {feature_config.get('name', 'unknown')}")
+                    continue
                 task = self.create_feature_task(agent, feature_config, worktree_path)
                 feature_agents.append(agent)
                 feature_tasks.append(task)
