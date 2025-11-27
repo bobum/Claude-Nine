@@ -44,14 +44,15 @@ def read_env_file() -> dict:
     if not env_path.exists():
         return settings
 
-    with open(env_path, 'r') as f:
+    with open(env_path, 'r', encoding='utf-8') as f:
         for line in f:
             line = line.strip()
             if not line or line.startswith('#'):
                 continue
             if '=' in line:
                 key, value = line.split('=', 1)
-                settings[key.strip()] = value.strip()
+                # Strip the \x16 control character that Windows CP1252 encoding may introduce
+                settings[key.strip()] = value.strip().lstrip('\x16')
 
     return settings
 
@@ -63,7 +64,7 @@ def write_env_file(settings: dict) -> None:
     # Read existing file to preserve comments and structure
     existing_content = []
     if env_path.exists():
-        with open(env_path, 'r') as f:
+        with open(env_path, 'r', encoding='utf-8') as f:
             existing_content = f.readlines()
 
     # Update or add settings
@@ -92,7 +93,7 @@ def write_env_file(settings: dict) -> None:
             new_lines.append(f"{key}={value}\n")
 
     # Write back to file
-    with open(env_path, 'w') as f:
+    with open(env_path, 'w', encoding='utf-8') as f:
         f.writelines(new_lines)
 
 
@@ -171,6 +172,39 @@ def update_settings(settings: SettingsSchema):
 
     # Return masked values
     return get_settings()
+
+
+@router.get("/orchestrator/config")
+def get_orchestrator_config():
+    """
+    Get orchestrator configuration for subprocess execution.
+
+    This endpoint returns the full configuration needed by the orchestrator,
+    including the unmasked API key. No authentication required as this is
+    intended for localhost-only use by orchestrator subprocesses.
+
+    Returns:
+        Configuration dict with anthropic_api_key, main_branch, check_interval
+    """
+    env_vars = read_env_file()
+
+    return {
+        "anthropic_api_key": env_vars.get('ANTHROPIC_API_KEY', ''),
+        "main_branch": "main",
+        "check_interval": 60,
+        "crew": {
+            "process": "sequential",
+            "verbose": True
+        },
+        "git": {
+            "main_branch": "main",
+            "auto_merge": False
+        },
+        "monitor": {
+            "enabled": True,
+            "check_interval": 30
+        }
+    }
 
 
 @router.post("/test/{integration}")

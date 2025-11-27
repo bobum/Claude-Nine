@@ -16,6 +16,7 @@ import yaml
 import logging
 import signal
 import atexit
+import requests
 from typing import List, Dict, Any, Tuple
 from datetime import datetime
 from pathlib import Path
@@ -97,7 +98,27 @@ class MultiAgentOrchestrator:
         logger.info(f"Found {len(self.tasks_config)} feature tasks to process")
 
     def _load_config(self, config_path: str) -> Dict[str, Any]:
-        """Load configuration from YAML file."""
+        """
+        Load configuration from API endpoint or YAML file (fallback).
+
+        Fetches configuration from the Claude-Nine API to avoid Windows encoding issues
+        with API keys in YAML files. Falls back to YAML file if API is not available.
+        """
+        # Try to fetch config from API first
+        try:
+            api_url = os.getenv('CLAUDE_NINE_API_URL', 'http://localhost:8000')
+            response = requests.get(f"{api_url}/api/settings/orchestrator/config", timeout=5)
+
+            if response.status_code == 200:
+                config = response.json()
+                logger.info(f"Loaded configuration from API endpoint: {api_url}")
+                return config
+            else:
+                logger.warning(f"API returned status {response.status_code}, falling back to file")
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"Could not fetch config from API ({e}), falling back to file")
+
+        # Fallback to YAML file
         try:
             with open(config_path, 'r', encoding='utf-8') as f:
                 config = yaml.safe_load(f)
@@ -111,10 +132,8 @@ class MultiAgentOrchestrator:
                 'anthropic_api_key': os.getenv('ANTHROPIC_API_KEY', '')
             }
         except Exception as e:
-            logger.error(f"Error loading config: {e}")
-            # TODO: Fix Windows encoding issue with API key in YAML files
-            # For now, bypass the error and use environment variable
-            logger.warning("Bypassing config file due to encoding error, using environment variable for API key")
+            logger.error(f"Error loading config from file: {e}")
+            logger.warning("Using environment variable for API key")
             return {
                 'main_branch': 'main',
                 'check_interval': 60,
