@@ -81,6 +81,37 @@ else
     exit 1
 fi
 
+# Check for Python 3.14+ and warn (causes venv conflicts)
+PYTHON_314_FOUND=false
+if command_exists py && py -3.14 --version >/dev/null 2>&1; then
+    PYTHON_314_FOUND=true
+    PYTHON_314_VERSION=$(py -3.14 --version 2>&1 | awk '{print $2}')
+elif python3.14 --version >/dev/null 2>&1; then
+    PYTHON_314_FOUND=true
+    PYTHON_314_VERSION=$(python3.14 --version 2>&1 | awk '{print $2}')
+elif python --version 2>&1 | grep -q "3.14"; then
+    PYTHON_314_FOUND=true
+    PYTHON_314_VERSION=$(python --version 2>&1 | awk '{print $2}')
+elif python3 --version 2>&1 | grep -q "3.14"; then
+    PYTHON_314_FOUND=true
+    PYTHON_314_VERSION=$(python3 --version 2>&1 | awk '{print $2}')
+fi
+
+if [ "$PYTHON_314_FOUND" = true ]; then
+    echo ""
+    echo -e "${RED}✗ WARNING: Python 3.14+ detected ($PYTHON_314_VERSION)${NC}"
+    echo ""
+    echo "  Python 3.14 is NOT compatible with Claude-Nine because:"
+    echo "  - CrewAI requires Python 3.10-3.13"
+    echo "  - Having Python 3.14 installed causes virtual environment conflicts"
+    echo "  - The venv may leak and use Python 3.14's packages incorrectly"
+    echo ""
+    echo "  Please uninstall Python 3.14 before continuing."
+    echo "  You can keep Python 3.13 as your only Python installation."
+    echo ""
+    exit 1
+fi
+
 # Check Node.js
 if command_exists node; then
     NODE_VERSION=$(node --version)

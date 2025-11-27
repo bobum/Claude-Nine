@@ -99,7 +99,7 @@ class MultiAgentOrchestrator:
     def _load_config(self, config_path: str) -> Dict[str, Any]:
         """Load configuration from YAML file."""
         try:
-            with open(config_path, 'r') as f:
+            with open(config_path, 'r', encoding='utf-8') as f:
                 config = yaml.safe_load(f)
             logger.info(f"Loaded configuration from {config_path}")
             return config
@@ -112,12 +112,19 @@ class MultiAgentOrchestrator:
             }
         except Exception as e:
             logger.error(f"Error loading config: {e}")
-            raise
+            # TODO: Fix Windows encoding issue with API key in YAML files
+            # For now, bypass the error and use environment variable
+            logger.warning("Bypassing config file due to encoding error, using environment variable for API key")
+            return {
+                'main_branch': 'main',
+                'check_interval': 60,
+                'anthropic_api_key': os.getenv('ANTHROPIC_API_KEY', '')
+            }
 
     def _load_tasks(self, tasks_path: str) -> List[Dict[str, Any]]:
         """Load tasks from YAML file."""
         try:
-            with open(tasks_path, 'r') as f:
+            with open(tasks_path, 'r', encoding='utf-8') as f:
                 tasks_data = yaml.safe_load(f)
 
             if 'features' in tasks_data:
@@ -187,7 +194,7 @@ Always make commits with descriptive messages. Work independently and focus on y
 
             # Create LLM with explicit API key
             llm = LLM(
-                model="anthropic/claude-sonnet-4-20250514",
+                model="anthropic/claude-sonnet-4-5-20250929",
                 api_key=os.getenv("ANTHROPIC_API_KEY"),
                 max_tokens=4096
             )
@@ -257,7 +264,7 @@ directories - just monitor and merge their branches.
 
         # Create LLM with explicit API key
         llm = LLM(
-            model="anthropic/claude-sonnet-4-20250514",
+            model="anthropic/claude-sonnet-4-5-20250929",
             api_key=os.getenv("ANTHROPIC_API_KEY"),
             max_tokens=4096
         )

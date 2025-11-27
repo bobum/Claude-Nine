@@ -11,6 +11,7 @@ import subprocess
 import threading
 import json
 import tempfile
+import logging
 from typing import Dict, List, Optional
 from pathlib import Path
 from datetime import datetime
@@ -22,6 +23,8 @@ from ..models import Team, Agent, WorkItem
 from ..database import SessionLocal
 from ..websocket import notify_agent_update, notify_work_item_update, notify_team_update
 from ..config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class OrchestratorService:
@@ -66,6 +69,7 @@ class OrchestratorService:
         Returns:
             dict with status information
         """
+        print(f"=== DEBUG: start_team called for team {team_id} ===")
         team_id_str = str(team_id)
 
         # Check if already running
@@ -95,36 +99,54 @@ class OrchestratorService:
         config_yaml = self._generate_config_yaml(team)
 
         # Create temporary files for the configuration
-        tasks_file = tempfile.NamedTemporaryFile(
-            mode='w',
-            suffix='.yaml',
-            delete=False,
-            prefix=f'team_{team_id_str}_tasks_'
-        )
-        tasks_file.write(tasks_yaml)
-        tasks_file.close()
+        # Use manual file writing with explicit UTF-8 to avoid Windows encoding issues
+        import tempfile as _tempfile
+        temp_dir = _tempfile.gettempdir()
 
-        config_file = tempfile.NamedTemporaryFile(
-            mode='w',
-            suffix='.yaml',
-            delete=False,
-            prefix=f'team_{team_id_str}_config_'
-        )
-        config_file.write(config_yaml)
-        config_file.close()
+        tasks_file_path = Path(temp_dir) / f'team_{team_id_str}_tasks_{os.urandom(4).hex()}.yaml'
+        with open(tasks_file_path, 'w', encoding='utf-8') as f:
+            f.write(tasks_yaml)
+
+        config_file_path = Path(temp_dir) / f'team_{team_id_str}_config_{os.urandom(4).hex()}.yaml'
+        with open(config_file_path, 'w', encoding='utf-8') as f:
+            f.write(config_yaml)
+
+        # Log the generated configuration
+        print(f"=== DEBUG: Generated config YAML for team {team_id_str} ===")
+        print(config_yaml)
+        print(f"=== DEBUG: Config file written to: {config_file_path} ===")
+        print(f"=== DEBUG: Generated tasks YAML for team {team_id_str} ===")
+        print(tasks_yaml)
+        print(f"=== DEBUG: Tasks file written to: {tasks_file_path} ===")
+        logger.info(f"Generated config YAML for team {team_id_str}:\n{config_yaml}")
+        logger.info(f"Config file written to: {config_file_path}")
+        logger.info(f"Generated tasks YAML for team {team_id_str}:\n{tasks_yaml}")
+        logger.info(f"Tasks file written to: {tasks_file_path}")
 
         # Prepare the command to run the orchestrator
+        # Use the venv Python interpreter explicitly (not sys.executable which may be system Python)
+        venv_python = Path(__file__).parent.parent.parent.parent / "venv" / "Scripts" / "python.exe"
+        if not venv_python.exists():
+            # Fallback for Linux/Mac
+            venv_python = Path(__file__).parent.parent.parent.parent / "venv" / "bin" / "python"
+
         cmd = [
-            sys.executable,  # Use the same Python interpreter
+            str(venv_python),
             str(self.orchestrator_script),
-            '--config', config_file.name,
-            '--tasks', tasks_file.name,
+            '--config', str(config_file_path),
+            '--tasks', str(tasks_file_path),
             '--team-id', team_id_str  # Pass team ID so orchestrator can report back
         ]
 
         # Set environment variables
         env = os.environ.copy()
         env['ANTHROPIC_API_KEY'] = settings.anthropic_api_key
+
+        # Log the command
+        logger.info(f"Starting orchestrator for team {team_id_str}")
+        logger.info(f"Command: {' '.join(cmd)}")
+        logger.info(f"Working directory: {team.repo_path}")
+        logger.info(f"Python executable: {sys.executable}")
 
         # Start the orchestrator process
         try:
@@ -141,8 +163,8 @@ class OrchestratorService:
             with self._lock:
                 self.running_orchestrators[team_id_str] = {
                     'process': process,
-                    'tasks_file': tasks_file.name,
-                    'config_file': config_file.name,
+                    'tasks_file': str(tasks_file_path),
+                    'config_file': str(config_file_path),
                     'started_at': datetime.utcnow(),
                     'work_items': [str(wi.id) for wi in work_items]
                 }
@@ -197,8 +219,10 @@ class OrchestratorService:
 
         except Exception as e:
             # Clean up temp files on error
-            os.unlink(tasks_file.name)
-            os.unlink(config_file.name)
+            if tasks_file_path.exists():
+                os.unlink(tasks_file_path)
+            if config_file_path.exists():
+                os.unlink(config_file_path)
             raise RuntimeError(f"Failed to start orchestrator: {str(e)}")
 
     def stop_team(self, team_id: UUID, db: Session) -> dict:
@@ -269,6 +293,13 @@ class OrchestratorService:
         """Monitor orchestrator process and update database when it completes"""
         # Wait for process to complete
         stdout, stderr = process.communicate()
+
+        # Log the output
+        logger.info(f"Orchestrator for team {team_id_str} finished with return code: {process.returncode}")
+        if stdout:
+            logger.info(f"Orchestrator stdout:\n{stdout}")
+        if stderr:
+            logger.error(f"Orchestrator stderr:\n{stderr}")
 
         # Process has finished
         with self._lock:

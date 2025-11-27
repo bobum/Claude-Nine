@@ -1,0 +1,19 @@
+# Auto-generated config for team: Schematics Visualization Team
+
+# API Keys
+anthropic_api_key: YOUR_ANTHROPIC_API_KEY_HERE
+
+# CrewAI Configuration
+crew:
+  process: parallel
+  verbose: true
+
+# Git Configuration
+git:
+  main_branch: main
+  auto_merge: false
+
+# Monitor Configuration
+monitor:
+  enabled: true
+  check_interval: 30
