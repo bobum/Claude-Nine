@@ -24,6 +24,40 @@ class SettingsSchema(BaseModel):
     linear_api_key: Optional[str] = None
 
 
+class CrewConfigSchema(BaseModel):
+    """CrewAI configuration settings."""
+    process: str
+    verbose: bool
+
+
+class GitConfigSchema(BaseModel):
+    """Git configuration settings."""
+    main_branch: str
+    auto_merge: bool
+
+
+class MonitorConfigSchema(BaseModel):
+    """Monitor configuration settings."""
+    enabled: bool
+    check_interval: int
+
+
+class OrchestratorConfigSchema(BaseModel):
+    """
+    Orchestrator configuration response schema.
+
+    This schema defines the complete configuration object returned by the
+    /api/settings/orchestrator/config endpoint, which is used by orchestrator
+    subprocesses to obtain their runtime configuration including API credentials.
+    """
+    anthropic_api_key: str
+    main_branch: str
+    check_interval: int
+    crew: CrewConfigSchema
+    git: GitConfigSchema
+    monitor: MonitorConfigSchema
+
+
 def get_env_path() -> Path:
     """Get path to .env file."""
     return Path(__file__).parent.parent.parent / ".env"
@@ -174,37 +208,79 @@ def update_settings(settings: SettingsSchema):
     return get_settings()
 
 
-@router.get("/orchestrator/config")
-def get_orchestrator_config():
-    """
-    Get orchestrator configuration for subprocess execution.
+@router.get(
+    "/orchestrator/config",
+    response_model=OrchestratorConfigSchema,
+    summary="Get Orchestrator Configuration",
+    description="""
+    Retrieve complete orchestrator configuration for subprocess execution.
 
-    This endpoint returns the full configuration needed by the orchestrator,
-    including the unmasked API key. No authentication required as this is
-    intended for localhost-only use by orchestrator subprocesses.
+    This endpoint provides all runtime configuration needed by orchestrator subprocesses,
+    including:
+    - Anthropic API credentials (unmasked)
+    - Git workflow settings
+    - CrewAI process configuration
+    - Monitor settings
 
-    Returns:
-        Configuration dict with anthropic_api_key, main_branch, check_interval
-    """
-    env_vars = read_env_file()
+    **Important Notes:**
+    - This endpoint returns unmasked API keys
+    - Intended for localhost-only use by orchestrator subprocesses
+    - No authentication required (trust localhost access)
+    - Solves Windows file encoding issues by serving config via HTTP instead of YAML files
 
-    return {
-        "anthropic_api_key": env_vars.get('ANTHROPIC_API_KEY', ''),
-        "main_branch": "main",
-        "check_interval": 60,
-        "crew": {
-            "process": "sequential",
-            "verbose": True
-        },
-        "git": {
-            "main_branch": "main",
-            "auto_merge": False
-        },
-        "monitor": {
-            "enabled": True,
-            "check_interval": 30
+    **Use Case:**
+    Orchestrator subprocesses call this endpoint at startup to obtain their configuration,
+    avoiding Windows CP1252 encoding issues that corrupt API keys when reading from files.
+    """,
+    tags=["Settings", "Orchestrator"],
+    responses={
+        200: {
+            "description": "Orchestrator configuration successfully retrieved",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "anthropic_api_key": "sk-ant-api03-...",
+                        "main_branch": "main",
+                        "check_interval": 60,
+                        "crew": {
+                            "process": "sequential",
+                            "verbose": True
+                        },
+                        "git": {
+                            "main_branch": "main",
+                            "auto_merge": False
+                        },
+                        "monitor": {
+                            "enabled": True,
+                            "check_interval": 30
+                        }
+                    }
+                }
+            }
         }
     }
+)
+def get_orchestrator_config() -> OrchestratorConfigSchema:
+    """Get orchestrator configuration for subprocess execution."""
+    env_vars = read_env_file()
+
+    return OrchestratorConfigSchema(
+        anthropic_api_key=env_vars.get('ANTHROPIC_API_KEY', ''),
+        main_branch="main",
+        check_interval=60,
+        crew=CrewConfigSchema(
+            process="sequential",
+            verbose=True
+        ),
+        git=GitConfigSchema(
+            main_branch="main",
+            auto_merge=False
+        ),
+        monitor=MonitorConfigSchema(
+            enabled=True,
+            check_interval=30
+        )
+    )
 
 
 @router.post("/test/{integration}")
