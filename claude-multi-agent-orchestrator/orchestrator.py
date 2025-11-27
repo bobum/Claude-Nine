@@ -413,6 +413,14 @@ their branches in the shared repository. Focus on branch management and merging.
 
     def cleanup(self):
         """Clean up all worktrees on shutdown."""
+        # Stop telemetry collector
+        if self.telemetry_collector:
+            try:
+                self.telemetry_collector.stop()
+                logger.info("Telemetry collector stopped")
+            except Exception as e:
+                logger.warning(f"Error stopping telemetry: {e}")
+
         if not self.worktrees:
             return
 
@@ -459,6 +467,27 @@ their branches in the shared repository. Focus on branch management and merging.
             logger.info(f"Created 1 monitor agent (working in main repo)")
             logger.info(f"Worktrees created at: {[str(p) for p in worktree_paths]}")
             logger.info(f"Starting crew with {len(all_tasks)} tasks in parallel")
+
+            # Initialize telemetry if team_id provided
+            if self.team_id:
+                try:
+                    # Extract agent names from feature configs
+                    agent_names = [fc.get("name", f"Agent-{idx}") for idx, fc in enumerate(self.tasks_config)]
+                    agent_names.append("Monitor")  # Add monitor agent
+
+                    # Initialize telemetry collector
+                    api_url = os.getenv("CLAUDE_NINE_API_URL", "http://localhost:8000")
+                    self.telemetry_collector = TelemetryCollector(
+                        team_id=self.team_id,
+                        agent_names=agent_names,
+                        api_url=api_url,
+                        check_interval=2
+                    )
+                    self.telemetry_collector.start()
+                    logger.info(f"Started telemetry collection for team {self.team_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to start telemetry: {e}")
+
 
             # Create and run crew
             crew = Crew(
@@ -573,6 +602,8 @@ def main():
     orchestrator = MultiAgentOrchestrator(
         config_path=args.config,
         tasks_path=args.tasks
+    ,
+        team_id=args.team_id
     )
     orchestrator.setup_signal_handlers()
 
