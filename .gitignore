@@ -16,3 +16,18 @@ Thumbs.db
 *.swo
 *~
 venv/
+
+# Helper scripts
+activate.sh
+
+# Database files
+*.db
+*.db-journal
+
+# Test files
+test_*.py
+test_*.yaml
+*.bak
+
+# Claude Code workspace
+.claude/
