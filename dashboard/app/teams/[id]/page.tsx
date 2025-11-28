@@ -25,7 +25,7 @@ export default function TeamDetailPage() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [showAddAgent, setShowAddAgent] = useState(false);
-  const [newAgent, setNewAgent] = useState({ name: "", role: "", goal: "" });
+  const [newAgent, setNewAgent] = useState({ name: "", persona_type: "developer", role: "", goal: "" });
 
   const loadTeam = async () => {
     try {
@@ -76,7 +76,7 @@ export default function TeamDetailPage() {
     e.preventDefault();
     try {
       await addAgentToTeam(teamId, newAgent);
-      setNewAgent({ name: "", role: "", goal: "" });
+      setNewAgent({ name: "", persona_type: "developer", role: "", goal: "" });
       setShowAddAgent(false);
       await loadTeam();
     } catch (error) {
@@ -336,6 +336,20 @@ export default function TeamDetailPage() {
                     }
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
                   />
+                  <select
+                    required
+                    value={newAgent.persona_type}
+                    onChange={(e) =>
+                      setNewAgent({ ...newAgent, persona_type: e.target.value })
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                  >
+                    <option value="developer">Developer</option>
+                    <option value="architect">Architect</option>
+                    <option value="tester">Tester</option>
+                    <option value="reviewer">Reviewer</option>
+                    <option value="devops">DevOps</option>
+                  </select>
                   <input
                     type="text"
                     placeholder="Role"
