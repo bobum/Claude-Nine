@@ -41,6 +41,49 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+# Spinner function that shows progress from a log file
+# Usage: spin_with_progress <pid> <log_file> <message>
+spin_with_progress() {
+    local pid=$1
+    local log_file=$2
+    local message=$3
+    local spin_chars='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    local i=0
+    local last_pkg=""
+
+    # Hide cursor
+    tput civis 2>/dev/null || true
+
+    while kill -0 $pid 2>/dev/null; do
+        # Get current package being installed from log
+        if [ -f "$log_file" ]; then
+            # Look for pip style "Collecting package" or npm style "added X packages"
+            local current=$(grep -E "^(Collecting|Installing|Downloading|Building|added|npm warn|reify:)" "$log_file" 2>/dev/null | tail -1 | sed 's/reify:/Installing:/' | head -c 60)
+            if [ -n "$current" ] && [ "$current" != "$last_pkg" ]; then
+                last_pkg="$current"
+            fi
+        fi
+
+        local char="${spin_chars:$i:1}"
+        i=$(( (i + 1) % ${#spin_chars} ))
+
+        # Clear line and show spinner with current activity
+        if [ -n "$last_pkg" ]; then
+            printf "\r${YELLOW}%s${NC} %s: %s...   " "$char" "$message" "$last_pkg"
+        else
+            printf "\r${YELLOW}%s${NC} %s...   " "$char" "$message"
+        fi
+
+        sleep 0.1
+    done
+
+    # Show cursor again
+    tput cnorm 2>/dev/null || true
+
+    # Clear the spinner line
+    printf "\r%-80s\r" " "
+}
+
 echo -e "${BLUE}[1/7] Checking Prerequisites...${NC}"
 echo ""
 
@@ -337,11 +380,18 @@ echo ""
 echo "Upgrading pip to latest version..."
 python -m pip install --upgrade pip --quiet
 
-echo "Installing API dependencies (this may take 1-2 minutes)..."
-if pip install -r requirements.txt; then
+echo "Installing API dependencies..."
+API_LOG="/tmp/claude-nine-api-deps.log"
+pip install -r requirements.txt > "$API_LOG" 2>&1 &
+PIP_PID=$!
+spin_with_progress $PIP_PID "$API_LOG" "Installing API packages"
+wait $PIP_PID
+PIP_EXIT=$?
+if [ $PIP_EXIT -eq 0 ]; then
     echo -e "${GREEN}✓${NC} API dependencies installed"
 else
     echo -e "${RED}✗${NC} Failed to install API dependencies"
+    echo "See $API_LOG for details"
     exit 1
 fi
 
@@ -355,13 +405,20 @@ echo ""
 
 cd claude-multi-agent-orchestrator
 
-echo "Installing orchestrator dependencies (this may take 2-5 minutes, CrewAI has many dependencies)..."
-if pip install -r requirements.txt; then
+echo "Installing orchestrator dependencies (CrewAI has many packages)..."
+ORCH_LOG="/tmp/claude-nine-orch-deps.log"
+pip install -r requirements.txt > "$ORCH_LOG" 2>&1 &
+PIP_PID=$!
+spin_with_progress $PIP_PID "$ORCH_LOG" "Installing orchestrator packages"
+wait $PIP_PID
+PIP_EXIT=$?
+if [ $PIP_EXIT -eq 0 ]; then
     echo -e "${GREEN}✓${NC} Orchestrator dependencies installed"
 else
     echo -e "${RED}✗${NC} Failed to install orchestrator dependencies"
     echo "This may be due to Python version compatibility."
     echo "Please ensure you're using Python 3.10-3.13"
+    echo "See $ORCH_LOG for details"
     exit 1
 fi
 
@@ -375,19 +432,31 @@ echo ""
 
 cd dashboard
 
-echo "Installing Node.js dependencies (this may take a few minutes)..."
-if npm install --quiet > /tmp/claude-nine-npm-install.log 2>&1; then
+echo "Installing Node.js dependencies..."
+NPM_LOG="/tmp/claude-nine-npm-install.log"
+npm install > "$NPM_LOG" 2>&1 &
+NPM_PID=$!
+spin_with_progress $NPM_PID "$NPM_LOG" "Installing npm packages"
+wait $NPM_PID
+NPM_EXIT=$?
+if [ $NPM_EXIT -eq 0 ]; then
     echo -e "${GREEN}✓${NC} Node.js dependencies installed"
 else
-    echo -e "${RED}✗${NC} npm install failed. Check /tmp/claude-nine-npm-install.log for details."
+    echo -e "${RED}✗${NC} npm install failed. See $NPM_LOG for details."
     exit 1
 fi
 
-echo "Building dashboard (this may take a minute)..."
-if npm run build > /tmp/claude-nine-npm-build.log 2>&1; then
+echo "Building dashboard..."
+BUILD_LOG="/tmp/claude-nine-npm-build.log"
+npm run build > "$BUILD_LOG" 2>&1 &
+BUILD_PID=$!
+spin_with_progress $BUILD_PID "$BUILD_LOG" "Building dashboard"
+wait $BUILD_PID
+BUILD_EXIT=$?
+if [ $BUILD_EXIT -eq 0 ]; then
     echo -e "${GREEN}✓${NC} Dashboard built successfully"
 else
-    echo -e "${RED}✗${NC} Dashboard build failed. Check /tmp/claude-nine-npm-build.log for details."
+    echo -e "${RED}✗${NC} Dashboard build failed. See $BUILD_LOG for details."
     echo "You can still try running with: npm run dev (development mode)"
     # Don't exit - dev mode might still work
 fi
