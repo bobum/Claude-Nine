@@ -47,7 +47,7 @@ spin_with_progress() {
     local pid=$1
     local log_file=$2
     local message=$3
-    local spin_chars='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    local spin_chars='|/-\'
     local i=0
     local last_pkg=""
 
@@ -58,30 +58,30 @@ spin_with_progress() {
         # Get current package being installed from log
         if [ -f "$log_file" ]; then
             # Look for pip style "Collecting package" or npm style "added X packages"
-            local current=$(grep -E "^(Collecting|Installing|Downloading|Building|added|npm warn|reify:)" "$log_file" 2>/dev/null | tail -1 | sed 's/reify:/Installing:/' | head -c 60)
+            local current=$(grep -E "^(Collecting|Installing|Downloading|Building|added|npm warn|reify:)" "$log_file" 2>/dev/null | tail -1 | sed 's/reify:/Installing:/' | head -c 50)
             if [ -n "$current" ] && [ "$current" != "$last_pkg" ]; then
                 last_pkg="$current"
             fi
         fi
 
         local char="${spin_chars:$i:1}"
-        i=$(( (i + 1) % ${#spin_chars} ))
+        i=$(( (i + 1) % 4 ))
 
-        # Clear line and show spinner with current activity
+        # Use ANSI escape: move to column 0 and clear line
         if [ -n "$last_pkg" ]; then
-            printf "\r${YELLOW}%s${NC} %s: %s...   " "$char" "$message" "$last_pkg"
+            echo -ne "\r\033[K${YELLOW}[${char}]${NC} ${message}: ${last_pkg}"
         else
-            printf "\r${YELLOW}%s${NC} %s...   " "$char" "$message"
+            echo -ne "\r\033[K${YELLOW}[${char}]${NC} ${message}..."
         fi
 
-        sleep 0.1
+        sleep 0.15
     done
 
     # Show cursor again
     tput cnorm 2>/dev/null || true
 
-    # Clear the spinner line
-    printf "\r%-80s\r" " "
+    # Clear the line completely
+    echo -ne "\r\033[K"
 }
 
 echo -e "${BLUE}[1/7] Checking Prerequisites...${NC}"
