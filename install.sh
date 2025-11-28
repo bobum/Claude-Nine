@@ -241,13 +241,20 @@ if [ -f "api/.env" ] && grep -q "ANTHROPIC_API_KEY" api/.env 2>/dev/null; then
 fi
 
 # Prompt for Anthropic API key if not set
+echo "[DEBUG] About to check ANTHROPIC_API_KEY variable..."
+echo "[DEBUG] Current value: '${ANTHROPIC_API_KEY}'"
 if [ -z "$ANTHROPIC_API_KEY" ]; then
+    echo "[DEBUG] API key is empty, prompting user..."
     read -p "Enter your Anthropic API key (or press Enter to set it later): " ANTHROPIC_API_KEY
+    echo "[DEBUG] User entered: '${ANTHROPIC_API_KEY}'"
     if [ -z "$ANTHROPIC_API_KEY" ]; then
         ANTHROPIC_API_KEY="your-api-key-here"
         echo -e "${YELLOW}⚠${NC} API key not set. You'll need to update api/.env before using Claude-Nine."
     fi
+else
+    echo "[DEBUG] API key already set, skipping prompt"
 fi
+echo "[DEBUG] Final API key value: '${ANTHROPIC_API_KEY}'"
 
 echo ""
 echo -e "${BLUE}Optional Integrations:${NC}"
