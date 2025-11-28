@@ -143,6 +143,7 @@ class OrchestratorService:
         # Set environment variables
         env = os.environ.copy()
         env['ANTHROPIC_API_KEY'] = settings.anthropic_api_key
+        env['CLAUDE_NINE_API_URL'] = 'http://localhost:8000'
 
         # Log the command
         logger.info(f"Starting orchestrator for team {team_id_str}")
