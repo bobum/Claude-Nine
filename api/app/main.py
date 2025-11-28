@@ -77,19 +77,31 @@ app.include_router(telemetry.router, prefix="/api/telemetry", tags=["telemetry"]
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint for real-time updates"""
+    import asyncio
     await manager.connect(websocket)
     try:
+        # Keep connection alive without blocking on receive
+        # This allows broadcast messages to be sent
         while True:
-            # Receive messages from client (e.g., subscribe to team)
-            data = await websocket.receive_json()
-            if data.get("action") == "subscribe_team":
-                team_id = data.get("team_id")
-                if team_id:
-                    await manager.subscribe_to_team(websocket, team_id)
-                    await manager.send_personal_message(
-                        {"type": "subscribed", "team_id": team_id},
-                        websocket
-                    )
+            # Small sleep to prevent CPU spinning
+            await asyncio.sleep(0.1)
+            # Check for incoming messages without blocking
+            try:
+                data = await asyncio.wait_for(
+                    websocket.receive_json(),
+                    timeout=0.01
+                )
+                if data.get("action") == "subscribe_team":
+                    team_id = data.get("team_id")
+                    if team_id:
+                        await manager.subscribe_to_team(websocket, team_id)
+                        await manager.send_personal_message(
+                            {"type": "subscribed", "team_id": team_id},
+                            websocket
+                        )
+            except asyncio.TimeoutError:
+                # No message received, continue (allows broadcasts)
+                pass
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 

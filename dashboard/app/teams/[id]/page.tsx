@@ -73,10 +73,13 @@ export default function TeamDetailPage() {
   useEffect(() => {
     if (lastMessage) {
       const message = lastMessage;
+      console.log('[WebSocket] Received message:', message.type, message);
 
       // Check if this is a telemetry update for an agent in this team
       if (message.type === "agent_telemetry" && message.team_id === teamId) {
         const telemetryData = message.data as AgentTelemetry;
+        console.log('[Telemetry] Received telemetry for agent:', telemetryData.agent_name, telemetryData);
+        console.log('[Telemetry] Current agent names:', team?.agents.map(a => a.name));
         setAgentTelemetry((prev) => ({
           ...prev,
           [telemetryData.agent_name]: telemetryData,

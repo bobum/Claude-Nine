@@ -18,6 +18,8 @@ from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy.orm import Session
+import asyncio
+
 
 from ..models import Team, Agent, WorkItem
 from ..database import SessionLocal
@@ -182,33 +184,42 @@ class OrchestratorService:
                 work_item.status = "in_progress"
                 work_item.started_at = datetime.utcnow()
                 # Send WebSocket notification
-                notify_work_item_update(
-                    str(work_item.id),
-                    str(team_id),
-                    "status_changed",
-                    {"status": "in_progress", "started_at": work_item.started_at.isoformat()}
-                )
+                try:
+                    asyncio.run(notify_work_item_update(
+                        str(work_item.id),
+                        str(team_id),
+                        "status_changed",
+                        {"status": "in_progress", "started_at": work_item.started_at.isoformat()}
+                    ))
+                except RuntimeError:
+                    pass  # Event loop may already be running
 
             # Update agents to working status
             for agent in team.agents:
                 agent.status = "working"
                 agent.last_activity = datetime.utcnow()
                 # Send WebSocket notification
-                notify_agent_update(
-                    str(agent.id),
-                    str(team_id),
-                    "status_changed",
-                    {"status": "working", "last_activity": agent.last_activity.isoformat()}
-                )
+                try:
+                    asyncio.run(notify_agent_update(
+                        str(agent.id),
+                        str(team_id),
+                        "status_changed",
+                        {"status": "working", "last_activity": agent.last_activity.isoformat()}
+                    ))
+                except RuntimeError:
+                    pass  # Event loop may already be running
 
             db.commit()
 
             # Send team update notification
-            notify_team_update(
-                str(team_id),
-                "orchestrator_started",
-                {"message": f"Orchestrator started with {len(work_items)} work items"}
-            )
+            try:
+                asyncio.run(notify_team_update(
+                    str(team_id),
+                    "orchestrator_started",
+                    {"message": f"Orchestrator started with {len(work_items)} work items"}
+                ))
+            except RuntimeError:
+                pass  # Event loop may already be running
 
             return {
                 "status": "started",
@@ -326,12 +337,15 @@ class OrchestratorService:
                     agent.status = "idle"
                     agent.last_activity = datetime.utcnow()
                     # Send WebSocket notification
-                    notify_agent_update(
-                        str(agent.id),
-                        team_id_str,
-                        "status_changed",
-                        {"status": "idle", "last_activity": agent.last_activity.isoformat()}
-                    )
+                    try:
+                        asyncio.run(notify_agent_update(
+                            str(agent.id),
+                            team_id_str,
+                            "status_changed",
+                            {"status": "idle", "last_activity": agent.last_activity.isoformat()}
+                        ))
+                    except RuntimeError:
+                        pass  # Event loop may already be running
 
                 # Update work items based on process result
                 if process.returncode == 0:
@@ -344,12 +358,15 @@ class OrchestratorService:
                         work_item.status = "completed"
                         work_item.completed_at = datetime.utcnow()
                         # Send WebSocket notification
-                        notify_work_item_update(
-                            str(work_item.id),
-                            team_id_str,
-                            "status_changed",
-                            {"status": "completed", "completed_at": work_item.completed_at.isoformat()}
-                        )
+                        try:
+                            asyncio.run(notify_work_item_update(
+                                str(work_item.id),
+                                team_id_str,
+                                "status_changed",
+                                {"status": "completed", "completed_at": work_item.completed_at.isoformat()}
+                            ))
+                        except RuntimeError:
+                            pass  # Event loop may already be running
                 else:
                     # Error - mark as queued again
                     work_items = db.query(WorkItem).filter(
@@ -360,22 +377,28 @@ class OrchestratorService:
                         work_item.status = "queued"
                         work_item.started_at = None
                         # Send WebSocket notification
-                        notify_work_item_update(
-                            str(work_item.id),
-                            team_id_str,
-                            "status_changed",
-                            {"status": "queued", "error": "Orchestrator failed"}
-                        )
+                        try:
+                            asyncio.run(notify_work_item_update(
+                                str(work_item.id),
+                                team_id_str,
+                                "status_changed",
+                                {"status": "queued", "error": "Orchestrator failed"}
+                            ))
+                        except RuntimeError:
+                            pass  # Event loop may already be running
 
                 db.commit()
 
                 # Send team update notification
                 status_msg = "completed successfully" if process.returncode == 0 else "failed"
-                notify_team_update(
-                    team_id_str,
-                    "orchestrator_stopped",
-                    {"message": f"Orchestrator {status_msg}", "return_code": process.returncode}
-                )
+                try:
+                    asyncio.run(notify_team_update(
+                        team_id_str,
+                        "orchestrator_stopped",
+                        {"message": f"Orchestrator {status_msg}", "return_code": process.returncode}
+                    ))
+                except RuntimeError:
+                    pass  # Event loop may already be running
         finally:
             db.close()
 
