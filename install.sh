@@ -347,6 +347,15 @@ else
     exit 1
 fi
 
+echo "Building dashboard (this may take a minute)..."
+if npm run build > /tmp/claude-nine-npm-build.log 2>&1; then
+    echo -e "${GREEN}✓${NC} Dashboard built successfully"
+else
+    echo -e "${RED}✗${NC} Dashboard build failed. Check /tmp/claude-nine-npm-build.log for details."
+    echo "You can still try running with: npm run dev (development mode)"
+    # Don't exit - dev mode might still work
+fi
+
 cd ..
 
 echo ""
@@ -442,12 +451,89 @@ fi
 
 echo ""
 
-# Start Dashboard in background with logging
-echo "Starting Dashboard on http://localhost:3000..."
+# Validate and prepare Dashboard
+echo "Checking Dashboard build..."
 cd dashboard
-npm run dev > ../logs/dashboard.log 2>&1 &
+
+# Check if .next directory exists and has required files
+NEEDS_BUILD=false
+if [ ! -d ".next" ]; then
+    echo -e "\${YELLOW}⚠ Dashboard not built (.next directory missing)\${NC}"
+    NEEDS_BUILD=true
+elif [ ! -f ".next/BUILD_ID" ]; then
+    echo -e "\${YELLOW}⚠ Dashboard build appears incomplete (missing BUILD_ID)\${NC}"
+    NEEDS_BUILD=true
+elif [ ! -d ".next/static" ]; then
+    echo -e "\${YELLOW}⚠ Dashboard build appears corrupted (missing static files)\${NC}"
+    NEEDS_BUILD=true
+fi
+
+# Rebuild if needed
+if [ "\$NEEDS_BUILD" = true ]; then
+    echo "Building dashboard (this may take a minute)..."
+    rm -rf .next
+    if npm run build > ../logs/dashboard-build.log 2>&1; then
+        echo -e "\${GREEN}✓ Dashboard built successfully\${NC}"
+    else
+        echo -e "\${RED}✗ Dashboard build failed\${NC}"
+        echo "Check logs/dashboard-build.log for details"
+        kill \$API_PID 2>/dev/null
+        exit 1
+    fi
+else
+    echo -e "\${GREEN}✓ Dashboard build is valid\${NC}"
+fi
+
+# Start Dashboard in production mode
+echo "Starting Dashboard on http://localhost:3000..."
+npm start > ../logs/dashboard.log 2>&1 &
 DASHBOARD_PID=\$!
 cd ..
+
+# Check if Dashboard process started
+if ! kill -0 \$DASHBOARD_PID 2>/dev/null; then
+    echo -e "\${RED}✗ Failed to start Dashboard process\${NC}"
+    echo "Check logs/dashboard.log for details"
+    kill \$API_PID 2>/dev/null
+    exit 1
+fi
+
+echo "Dashboard process started (PID: \$DASHBOARD_PID), waiting for it to be ready..."
+
+# Wait for Dashboard to be ready
+MAX_WAIT=30
+WAIT_COUNT=0
+DASHBOARD_READY=false
+
+while [ \$WAIT_COUNT -lt \$MAX_WAIT ]; do
+    if ! kill -0 \$DASHBOARD_PID 2>/dev/null; then
+        echo -e "\${RED}✗ Dashboard process died during startup\${NC}"
+        echo "Last 20 lines of logs/dashboard.log:"
+        tail -n 20 logs/dashboard.log
+        kill \$API_PID 2>/dev/null
+        exit 1
+    fi
+
+    if curl -s http://localhost:3000 > /dev/null 2>&1; then
+        DASHBOARD_READY=true
+        break
+    fi
+
+    sleep 1
+    WAIT_COUNT=\$((WAIT_COUNT + 1))
+    echo -n "."
+done
+
+echo ""
+
+if [ "\$DASHBOARD_READY" = true ]; then
+    echo -e "\${GREEN}✓ Dashboard is ready!\${NC}"
+else
+    echo -e "\${RED}✗ Dashboard failed to respond after \${MAX_WAIT}s\${NC}"
+    echo "Check logs/dashboard.log for details"
+    kill \$API_PID \$DASHBOARD_PID 2>/dev/null
+    exit 1
+fi
 
 echo ""
 echo -e "\${GREEN}✓ Claude-Nine is running!\${NC}"
@@ -528,14 +614,16 @@ else
     echo "API server not running"
 fi
 
-# Kill Dashboard
-DASH_PIDS=$(pgrep -f "next dev")
+# Kill Dashboard (handles both production 'next start' and dev 'next dev')
+DASH_PIDS=$(pgrep -f "next start" 2>/dev/null || pgrep -f "next dev" 2>/dev/null)
 if [ ! -z "$DASH_PIDS" ]; then
     echo "Stopping Dashboard (PIDs: $DASH_PIDS)..."
+    pkill -f "next start" 2>/dev/null
     pkill -f "next dev" 2>/dev/null
     pkill -f "node.*next" 2>/dev/null
     sleep 1
     # Force kill if still running
+    pkill -9 -f "next start" 2>/dev/null
     pkill -9 -f "next dev" 2>/dev/null
     pkill -9 -f "node.*next" 2>/dev/null
 else
