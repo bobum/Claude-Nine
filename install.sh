@@ -143,30 +143,66 @@ echo ""
 echo -e "${GREEN}All prerequisites met!${NC}"
 echo ""
 
+# Function to remove venv directory robustly on Windows
+remove_venv() {
+    local venv_dir="$1"
+    echo "Removing existing virtual environment..."
+
+    # On Windows/Git Bash, use a more robust removal strategy
+    if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OSTYPE" == "cygwin" ]]; then
+        # First, try to kill any Python processes that might be using the venv
+        echo "Checking for running Python processes..."
+        taskkill //F //IM python.exe 2>/dev/null || true
+        sleep 1
+
+        # Try multiple removal methods with timeout
+        echo "Attempting to remove venv directory..."
+
+        # Method 1: Standard rm with timeout (30 seconds)
+        timeout 30 rm -rf "$venv_dir" 2>/dev/null && echo "Removed with rm -rf" && return 0
+
+        # Method 2: Remove files first, then directories
+        echo "Trying alternative removal method..."
+        find "$venv_dir" -type f -delete 2>/dev/null || true
+        find "$venv_dir" -type d -delete 2>/dev/null || true
+
+        # Method 3: Use PowerShell if available (more reliable on Windows)
+        if command -v powershell.exe >/dev/null 2>&1; then
+            echo "Using PowerShell for removal..."
+            powershell.exe -Command "Remove-Item -Path '$venv_dir' -Recurse -Force -ErrorAction SilentlyContinue" 2>/dev/null || true
+        fi
+
+        # Verify removal
+        if [ -d "$venv_dir" ]; then
+            echo -e "${YELLOW}Warning: Could not fully remove venv directory.${NC}"
+            echo "Please manually delete the 'venv' folder and run install.sh again."
+            echo "Or press Ctrl+C to cancel and manually delete it."
+            read -p "Press Enter to continue anyway (not recommended)..." dummy
+        else
+            echo -e "${GREEN}✓${NC} Virtual environment removed successfully"
+        fi
+    else
+        # Unix/Linux/Mac: standard removal
+        rm -rf "$venv_dir"
+        echo -e "${GREEN}✓${NC} Virtual environment removed"
+    fi
+}
+
 # Create virtual environment
 echo -e "${BLUE}[2/7] Creating Python Virtual Environment...${NC}"
 echo ""
 
 VENV_DIR="venv"
 
+# Always remove existing venv and create fresh one for clean install
 if [ -d "$VENV_DIR" ]; then
-    echo -e "${YELLOW}Virtual environment already exists at $VENV_DIR${NC}"
-    read -p "Do you want to recreate it? (y/n): " RECREATE_VENV
-    if [[ $RECREATE_VENV =~ ^[Yy]$ ]]; then
-        echo "Removing existing virtual environment..."
-        rm -rf "$VENV_DIR"
-    else
-        echo "Using existing virtual environment"
-    fi
+    echo -e "${YELLOW}Existing virtual environment found${NC}"
+    remove_venv "$VENV_DIR"
 fi
 
-if [ ! -d "$VENV_DIR" ]; then
-    echo "Creating virtual environment with Python 3.13..."
-    $PYTHON_CMD -m venv "$VENV_DIR"
-    echo -e "${GREEN}✓${NC} Virtual environment created at $VENV_DIR"
-else
-    echo -e "${GREEN}✓${NC} Using existing virtual environment"
-fi
+echo "Creating virtual environment with Python 3.13..."
+$PYTHON_CMD -m venv "$VENV_DIR"
+echo -e "${GREEN}✓${NC} Virtual environment created at $VENV_DIR"
 
 # Activate virtual environment
 echo ""
@@ -301,8 +337,8 @@ echo ""
 echo "Upgrading pip to latest version..."
 python -m pip install --upgrade pip --quiet
 
-echo "Installing API dependencies..."
-if pip install -r requirements.txt --quiet; then
+echo "Installing API dependencies (this may take 1-2 minutes)..."
+if pip install -r requirements.txt; then
     echo -e "${GREEN}✓${NC} API dependencies installed"
 else
     echo -e "${RED}✗${NC} Failed to install API dependencies"
@@ -319,8 +355,8 @@ echo ""
 
 cd claude-multi-agent-orchestrator
 
-echo "Installing orchestrator dependencies (CrewAI, GitPython, etc.)..."
-if pip install -r requirements.txt --quiet; then
+echo "Installing orchestrator dependencies (this may take 2-5 minutes, CrewAI has many dependencies)..."
+if pip install -r requirements.txt; then
     echo -e "${GREEN}✓${NC} Orchestrator dependencies installed"
 else
     echo -e "${RED}✗${NC} Failed to install orchestrator dependencies"

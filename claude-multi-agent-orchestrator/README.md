@@ -541,6 +541,67 @@ watch -n 2 'git log --oneline -5 && echo && git status'
 - **Minimal Overhead**: Worktrees are lightweight (just file copies)
 - **Fast Cleanup**: Worktrees quickly removed on shutdown
 
+## Testing
+
+The orchestrator includes a comprehensive test suite for the telemetry system.
+
+### Running Tests
+
+Install test dependencies:
+
+```bash
+pip install pytest pytest-asyncio
+```
+
+Run all tests:
+
+```bash
+cd claude-multi-agent-orchestrator
+pytest tests/test_telemetry_collector.py -v
+```
+
+Run specific test class:
+
+```bash
+pytest tests/test_telemetry_collector.py::TestProcessMetrics -v
+```
+
+### Test Coverage
+
+The test suite validates telemetry collection without external dependencies:
+
+- **Process Metrics** - CPU, memory, thread monitoring (mocked psutil)
+- **Git Activity Parsing** - Commit, branch, checkout detection
+- **Token Usage Parsing** - Token counting and cost calculation
+- **Log Processing** - Agent context tracking, log buffer management
+- **API Reporting** - Telemetry transmission (mocked HTTP client)
+- **Lifecycle Management** - Start/stop/cleanup operations
+
+All tests use mocks to isolate the telemetry system:
+- `psutil.Process` - No real process monitoring needed
+- `httpx.Client` - No actual API calls made
+- All 24 tests run in isolation without side effects
+
+### Adding New Tests
+
+Follow the existing test structure in `tests/test_telemetry_collector.py`:
+
+```python
+class TestYourFeature:
+    """Test your new feature."""
+
+    def test_feature_behavior(self, collector):
+        """Test that feature works as expected."""
+        # Arrange
+        collector.current_agent = "TestAgent"
+
+        # Act
+        result = collector.your_method()
+
+        # Assert
+        assert result.expected_value == expected
+```
+
 ## Contributing
 
 To extend the orchestrator:
@@ -549,7 +610,8 @@ To extend the orchestrator:
 2. **Add new tools** in `git_tools.py`
 3. **Customize agent behavior** in `orchestrator.py`
 4. **Add new task types** in YAML definitions
-5. **Test with --cleanup-only** to ensure proper cleanup
+5. **Write tests** for new features in `tests/`
+6. **Test with --cleanup-only** to ensure proper cleanup
 
 ## License
 

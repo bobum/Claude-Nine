@@ -11,9 +11,13 @@ import {
   pauseTeam,
   deleteTeam,
   addAgentToTeam,
+  createWorkItem,
   type TeamWithWorkQueue,
   type TeamReadiness,
+  type AgentTelemetry,
 } from "@/lib/api";
+import { useWebSocket } from "@/lib/hooks";
+import AgentTelemetryCard from "@/components/AgentTelemetryCard";
 
 export default function TeamDetailPage() {
   const params = useParams();
@@ -26,6 +30,21 @@ export default function TeamDetailPage() {
   const [actionLoading, setActionLoading] = useState(false);
   const [showAddAgent, setShowAddAgent] = useState(false);
   const [newAgent, setNewAgent] = useState({ name: "", persona_type: "developer", role: "", goal: "" });
+  const [agentTelemetry, setAgentTelemetry] = useState<Record<string, AgentTelemetry>>({});
+  const [showAddWorkItem, setShowAddWorkItem] = useState(false);
+  const [expandedWorkItem, setExpandedWorkItem] = useState<string | null>(null);
+  const [newWorkItem, setNewWorkItem] = useState({
+    external_id: "",
+    source: "manual" as const,
+    title: "",
+    description: "",
+    priority: 0,
+    team_id: teamId,
+  });
+
+  // WebSocket connection for real-time telemetry
+  const wsUrl = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000/ws";
+  const { lastMessage, isConnected } = useWebSocket(wsUrl);
 
   const loadTeam = async () => {
     try {
@@ -49,6 +68,25 @@ export default function TeamDetailPage() {
     const interval = setInterval(loadTeam, 5000);
     return () => clearInterval(interval);
   }, [teamId]);
+
+  // Handle WebSocket messages for telemetry updates
+  useEffect(() => {
+    if (lastMessage) {
+      const message = lastMessage;
+      console.log('[WebSocket] Received message:', message.type, message);
+
+      // Check if this is a telemetry update for an agent in this team
+      if (message.type === "agent_telemetry" && message.team_id === teamId) {
+        const telemetryData = message.data as AgentTelemetry;
+        console.log('[Telemetry] Received telemetry for agent:', telemetryData.agent_name, telemetryData);
+        console.log('[Telemetry] Current agent names:', team?.agents.map(a => a.name));
+        setAgentTelemetry((prev) => ({
+          ...prev,
+          [telemetryData.agent_name]: telemetryData,
+        }));
+      }
+    }
+  }, [lastMessage, teamId]);
 
   const handleAction = async (
     action: "start" | "stop" | "pause" | "delete"
@@ -81,6 +119,25 @@ export default function TeamDetailPage() {
       await loadTeam();
     } catch (error) {
       console.error("Failed to add agent:", error);
+    }
+  };
+
+  const handleAddWorkItem = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      await createWorkItem({ ...newWorkItem, team_id: teamId });
+      setNewWorkItem({
+        external_id: "",
+        source: "manual",
+        title: "",
+        description: "",
+        priority: 0,
+        team_id: teamId,
+      });
+      setShowAddWorkItem(false);
+      await loadTeam();
+    } catch (error) {
+      console.error("Failed to add work item:", error);
     }
   };
 
@@ -147,7 +204,7 @@ export default function TeamDetailPage() {
             {team.status === "stopped" && (
               <button
                 onClick={() => handleAction("start")}
-                disabled={actionLoading}
+                disabled={actionLoading || !readiness?.is_ready}
                 className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded-md text-sm font-medium disabled:opacity-50"
               >
                 Start
@@ -193,7 +250,66 @@ export default function TeamDetailPage() {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto py-8 px-6">
-        {/* Team Info */}
+        {/* START Button Requirements Info */}
+        {readiness && !readiness.is_ready && (
+          <div className="bg-blue-50 border-l-4 border-blue-400 p-6 mb-6 rounded-lg">
+            <div className="flex items-start">
+              <div className="flex-shrink-0">
+                <svg
+                  className="h-6 w-6 text-blue-400"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                </svg>
+              </div>
+              <div className="ml-4 flex-1">
+                <h3 className="text-lg font-medium text-blue-800 mb-2">
+                  START Button Requirements
+                </h3>
+                <div className="text-sm text-blue-700 space-y-2">
+                  <p className="mb-3">
+                    To enable the START button, the following requirements must be met:
+                  </p>
+                  <ul className="space-y-2">
+                    <li className="flex items-center gap-2">
+                      <span className="text-lg">
+                        {readiness.agents_count > 0 ? '✅' : '❌'}
+                      </span>
+                      <span>
+                        {readiness.agents_count > 0 
+                          ? `${readiness.agents_count} Dev agent(s) configured` 
+                          : 'Add at least one Dev agent'}
+                      </span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <span className="text-lg">
+                        {readiness.queued_work_count > 0 ? '✅' : '❌'}
+                      </span>
+                      <span>
+                        {readiness.queued_work_count > 0 
+                          ? `${readiness.queued_work_count} work item(s) queued` 
+                          : 'Add at least one work item to the queue'}
+                      </span>
+                    </li>
+                  </ul>
+                  {readiness.is_ready && (
+                    <p className="mt-3 font-medium text-green-700">
+                      ✅ All requirements met! You can now START the team.
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="bg-white rounded-lg shadow p-6 mb-6">
           <div className="flex justify-between items-start">
             <div>
@@ -216,103 +332,41 @@ export default function TeamDetailPage() {
           </div>
         </div>
 
-        {/* Team Readiness Status */}
-        {readiness && !readiness.is_ready && (
-          <div className="bg-yellow-50 border-l-4 border-yellow-400 p-6 mb-6 rounded-lg">
-            <div className="flex items-start">
-              <div className="flex-shrink-0">
-                <svg
-                  className="h-6 w-6 text-yellow-400"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                  />
-                </svg>
-              </div>
-              <div className="ml-4 flex-1">
-                <h3 className="text-lg font-medium text-yellow-800 mb-2">
-                  Team Not Ready to Start
-                </h3>
-                <div className="text-sm text-yellow-700 space-y-2">
-                  <p className="font-medium">Issues to resolve:</p>
-                  <ul className="list-disc list-inside space-y-1">
-                    {readiness.issues.map((issue, idx) => (
-                      <li key={idx}>{issue}</li>
-                    ))}
-                  </ul>
-                </div>
+        {/* Agent Telemetry Grid */}
+        {team.status === "active" && team.agents.length > 0 && (
+          <div className="mb-6">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-2xl font-semibold text-gray-900 dark:text-gray-100">
+                Agent Telemetry
+              </h2>
+              <div className="flex items-center gap-2">
+                <div
+                  className={`w-3 h-3 rounded-full ${
+                    isConnected ? "bg-green-500" : "bg-red-500"
+                  }`}
+                ></div>
+                <span className="text-sm text-gray-600 dark:text-gray-400">
+                  {isConnected ? "Connected" : "Disconnected"}
+                </span>
               </div>
             </div>
-          </div>
-        )}
-
-        {/* Execution Status Info */}
-        {team.status === "active" && readiness && (
-          <div className="bg-blue-50 border-l-4 border-blue-400 p-6 mb-6 rounded-lg">
-            <div className="flex items-start">
-              <div className="flex-shrink-0">
-                <svg
-                  className="h-6 w-6 text-blue-400"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
-                </svg>
-              </div>
-              <div className="ml-4 flex-1">
-                <h3 className="text-lg font-medium text-blue-800 mb-2">
-                  Team Marked as Active
-                </h3>
-                <div className="text-sm text-blue-700 space-y-2">
-                  <p>
-                    This team is configured and ready, but agent execution is
-                    not yet implemented in the UI.
-                  </p>
-                  <div className="bg-white p-3 rounded mt-3">
-                    <p className="font-medium mb-2">Ready to execute:</p>
-                    <ul className="space-y-1">
-                      <li>✅ {readiness.agents_count} agent(s) configured</li>
-                      <li>
-                        ✅ {readiness.queued_work_count} work item(s) queued
-                      </li>
-                      <li>⏳ Waiting for orchestrator integration</li>
-                    </ul>
-                  </div>
-                  {readiness.queued_work_items.length > 0 && (
-                    <div className="mt-3">
-                      <p className="font-medium mb-2">Queued work items:</p>
-                      <ul className="space-y-1">
-                        {readiness.queued_work_items.map((item) => (
-                          <li key={item.id} className="text-xs">
-                            • {item.title}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                </div>
-              </div>
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {team.agents.map((agent) => (
+                <AgentTelemetryCard
+                  key={agent.id}
+                  agent={agent}
+                  telemetry={agentTelemetry[agent.name] || null}
+                />
+              ))}
             </div>
           </div>
         )}
 
         <div className="grid md:grid-cols-2 gap-6">
           {/* Agents */}
-          <div className="bg-white rounded-lg shadow p-6">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
             <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-semibold">
+              <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
                 Agents ({team.agents.length})
               </h2>
               <button
@@ -427,47 +481,183 @@ export default function TeamDetailPage() {
           {/* Work Queue */}
           <div className="bg-white rounded-lg shadow p-6">
             <h2 className="text-xl font-semibold mb-4">
-              Work Queue ({team.work_items.length})
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-semibold">
+                Work Queue ({team.work_items.length})
+              </h2>
+              <button
+                onClick={() => setShowAddWorkItem(!showAddWorkItem)}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm font-medium"
+              >
+                + Add Work Item
+              </button>
+            </div>
             </h2>
+
+            {showAddWorkItem && (
+              <form onSubmit={handleAddWorkItem} className="mb-4 p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
+                <div className="space-y-3">
+                  <div className="grid md:grid-cols-2 gap-3">
+                    <input
+                      type="text"
+                      placeholder="External ID (e.g., PBI-123)"
+                      required
+                      value={newWorkItem.external_id}
+                      onChange={(e) =>
+                        setNewWorkItem({ ...newWorkItem, external_id: e.target.value })
+                      }
+                      className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                    />
+                    <select
+                      value={newWorkItem.source}
+                      onChange={(e) =>
+                        setNewWorkItem({ ...newWorkItem, source: e.target.value as any })
+                      }
+                      className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                    >
+                      <option value="manual">Manual</option>
+                      <option value="azure_devops">Azure DevOps</option>
+                      <option value="jira">Jira</option>
+                      <option value="github">GitHub</option>
+                      <option value="linear">Linear</option>
+                    </select>
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="Title"
+                    required
+                    value={newWorkItem.title}
+                    onChange={(e) =>
+                      setNewWorkItem({ ...newWorkItem, title: e.target.value })
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                  />
+                  <textarea
+                    placeholder="Description"
+                    value={newWorkItem.description}
+                    onChange={(e) =>
+                      setNewWorkItem({ ...newWorkItem, description: e.target.value })
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                    rows={3}
+                  />
+                  <input
+                    type="number"
+                    placeholder="Priority"
+                    value={newWorkItem.priority}
+                    onChange={(e) =>
+                      setNewWorkItem({ ...newWorkItem, priority: parseInt(e.target.value) || 0 })
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      type="submit"
+                      className="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-sm font-medium"
+                    >
+                      Add
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowAddWorkItem(false)}
+                      className="flex-1 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 px-3 py-2 rounded-lg text-sm font-medium"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              </form>
+            )}
             {team.work_items.length === 0 ? (
               <p className="text-gray-500 text-center py-8">No work items</p>
             ) : (
               <div className="space-y-3">
-                {team.work_items.map((item) => (
-                  <div
-                    key={item.id}
-                    className="border rounded p-4 hover:bg-gray-50"
-                  >
-                    <div className="flex justify-between items-start mb-2">
-                      <div className="flex-1">
-                        <span className="text-xs text-gray-500">
-                          {item.source} #{item.external_id}
-                        </span>
-                        <h3 className="font-semibold">{item.title}</h3>
+                {[...team.work_items].reverse().map((item) => {
+                  const isExpanded = expandedWorkItem === item.id;
+                  return (
+                    <div
+                      key={item.id}
+                      onClick={() => setExpandedWorkItem(isExpanded ? null : item.id)}
+                      className="border rounded p-4 hover:bg-gray-50 cursor-pointer transition-all"
+                    >
+                      <div className="flex justify-between items-start mb-2">
+                        <div className="flex-1">
+                          <span className="text-xs text-gray-500">
+                            {item.source} #{item.external_id}
+                          </span>
+                          <h3 className="font-semibold">{item.title}</h3>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`px-2 py-1 rounded text-xs font-medium ${getStatusColor(
+                              item.status
+                            )}`}
+                          >
+                            {item.status}
+                          </span>
+                          <span className="text-gray-400">
+                            {isExpanded ? '▼' : '▶'}
+                          </span>
+                        </div>
                       </div>
-                      <span
-                        className={`px-2 py-1 rounded text-xs font-medium ${getStatusColor(
-                          item.status
-                        )}`}
-                      >
-                        {item.status}
-                      </span>
-                    </div>
-                    {item.description && (
-                      <p className="text-sm text-gray-600 mb-2">
-                        {item.description.substring(0, 100)}...
-                      </p>
-                    )}
-                    <div className="flex gap-4 text-xs text-gray-500">
-                      {item.priority !== null && (
-                        <span>Priority: {item.priority}</span>
+                      
+                      {!isExpanded && item.description && (
+                        <p className="text-sm text-gray-600 mb-2">
+                          {item.description.substring(0, 100)}...
+                        </p>
                       )}
-                      {item.story_points && (
-                        <span>Points: {item.story_points}</span>
+                      
+                      {isExpanded && (
+                        <div className="mt-4 space-y-3 bg-gray-50 p-4 rounded">
+                          <div>
+                            <h4 className="text-sm font-semibold text-gray-700 mb-1">Description</h4>
+                            <p className="text-sm text-gray-600 whitespace-pre-wrap">
+                              {item.description || 'No description'}
+                            </p>
+                          </div>
+                          
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <h4 className="text-sm font-semibold text-gray-700 mb-1">Source</h4>
+                              <p className="text-sm text-gray-600">{item.source}</p>
+                            </div>
+                            <div>
+                              <h4 className="text-sm font-semibold text-gray-700 mb-1">External ID</h4>
+                              <p className="text-sm text-gray-600">{item.external_id}</p>
+                            </div>
+                            {item.priority !== null && (
+                              <div>
+                                <h4 className="text-sm font-semibold text-gray-700 mb-1">Priority</h4>
+                                <p className="text-sm text-gray-600">{item.priority}</p>
+                              </div>
+                            )}
+                            {item.story_points && (
+                              <div>
+                                <h4 className="text-sm font-semibold text-gray-700 mb-1">Story Points</h4>
+                                <p className="text-sm text-gray-600">{item.story_points}</p>
+                              </div>
+                            )}
+                            <div>
+                              <h4 className="text-sm font-semibold text-gray-700 mb-1">Status</h4>
+                              <p className="text-sm text-gray-600">{item.status}</p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {!isExpanded && (
+                        <div className="flex gap-4 text-xs text-gray-500 mt-2">
+                          {item.priority !== null && (
+                            <span>Priority: {item.priority}</span>
+                          )}
+                          {item.story_points && (
+                            <span>Points: {item.story_points}</span>
+                          )}
+                        </div>
                       )}
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

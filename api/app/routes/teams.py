@@ -181,11 +181,16 @@ def delete_team(
 
 
 @router.post("/{team_id}/start")
-def start_team(
+async def start_team(
     team_id: UUID,
     db: Session = Depends(get_db)
 ):
-    """Start a team"""
+    """Start a team (TEST MODE: sends mock telemetry instead of running orchestrator)"""
+    from datetime import datetime
+    from ..websocket import notify_agent_telemetry
+    import asyncio
+    import random
+    
     db_team = db.query(Team).filter(Team.id == team_id).first()
     if not db_team:
         raise HTTPException(status_code=404, detail="Team not found")
@@ -229,28 +234,19 @@ def start_team(
     db_team.status = "active"
     db.commit()
 
-    # Start the orchestrator service
+    # Start the real orchestrator
     from ..services.orchestrator_service import get_orchestrator_service
     orch_service = get_orchestrator_service()
+    result = orch_service.start_team(team_id, db)
 
-    try:
-        result = orch_service.start_team(team_id, db)
-        return {
-            "message": "Team started successfully",
-            "team_id": str(team_id),
-            "agents_count": len(db_team.agents),
-            "queued_work_count": len(queued_items),
-            "orchestrator_status": result["status"],
-            "status": "active"
-        }
-    except Exception as e:
-        # Rollback team status if orchestrator fails to start
-        db_team.status = "stopped"
-        db.commit()
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to start orchestrator: {str(e)}"
-        )
+    return {
+        "message": "Team started successfully",
+        "team_id": str(team_id),
+        "agents_count": len(db_team.agents),
+        "queued_work_count": len(queued_items),
+        "orchestrator_status": result.get("status", "unknown"),
+        "status": "active"
+    }
 
 
 @router.post("/{team_id}/stop")

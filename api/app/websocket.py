@@ -113,3 +113,17 @@ async def notify_work_item_update(work_item_id: str, team_id: str, event: str, d
     if team_id:
         await manager.send_to_team(team_id, message)
     await manager.broadcast(message)
+
+
+async def notify_agent_telemetry(agent_id: str, team_id: str, event: str, data: dict):
+    """Notify clients about agent telemetry updates"""
+    message = {
+        "type": "agent_telemetry",
+        "agent_id": agent_id,
+        "team_id": team_id,
+        "event": event,
+        "data": data,
+        "timestamp": asyncio.get_event_loop().time()
+    }
+    await manager.send_to_team(team_id, message)
+    await manager.broadcast(message)

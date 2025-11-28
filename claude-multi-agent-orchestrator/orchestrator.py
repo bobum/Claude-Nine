@@ -17,13 +17,18 @@ import logging
 import signal
 import atexit
 import requests
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 from datetime import datetime
 from pathlib import Path
 
 from crewai import Agent, Task, Crew, Process, LLM
 from git_tools import create_git_tools
 from git_operations import GitOperations
+from telemetry_collector import (
+    initialize_telemetry,
+    get_telemetry_collector,
+    shutdown_telemetry
+)
 
 
 # Configure logging
@@ -50,13 +55,14 @@ class MultiAgentOrchestrator:
     - Automatic cleanup of worktrees on shutdown
     """
 
-    def __init__(self, config_path: str = "config.yaml", tasks_path: str = "tasks/example_tasks.yaml"):
+    def __init__(self, config_path: str = "config.yaml", tasks_path: str = "tasks/example_tasks.yaml", team_id: str = None):
         """
         Initialize the orchestrator.
 
         Args:
             config_path: Path to configuration file
             tasks_path: Path to tasks definition file
+            team_id: Team ID for API integration (optional)
         """
         self.config = self._load_config(config_path)
         self.tasks_config = self._load_tasks(tasks_path)
@@ -77,6 +83,9 @@ class MultiAgentOrchestrator:
         # Track worktrees for cleanup
         self.worktrees: List[str] = []
         self.running = True
+
+        # Telemetry
+        self.team_id = team_id
 
         # Set up API key
         if 'anthropic_api_key' in self.config and self.config['anthropic_api_key']:
@@ -141,7 +150,7 @@ class MultiAgentOrchestrator:
             }
 
     def _load_tasks(self, tasks_path: str) -> List[Dict[str, Any]]:
-        """Load tasks from YAML file."""
+        """Load tasks from YAML file. Returns empty list on error to keep orchestrator alive."""
         try:
             with open(tasks_path, 'r', encoding='utf-8') as f:
                 tasks_data = yaml.safe_load(f)
@@ -154,11 +163,13 @@ class MultiAgentOrchestrator:
             logger.info(f"Loaded {len(tasks)} tasks from {tasks_path}")
             return tasks
         except FileNotFoundError:
-            logger.error(f"Tasks file {tasks_path} not found")
-            raise
+            logger.error(f"[RESILIENT] Tasks file {tasks_path} not found - orchestrator will wait for tasks")
+            # Return empty list instead of crashing - orchestrator stays alive
+            return []
         except Exception as e:
-            logger.error(f"Error loading tasks: {e}")
-            raise
+            logger.error(f"[RESILIENT] Error loading tasks: {e} - orchestrator will continue with empty task list", exc_info=True)
+            # Return empty list instead of crashing - orchestrator stays alive
+            return []
 
     def create_feature_agent(self, feature_config: Dict[str, Any]) -> Tuple[Agent, str]:
         """
@@ -232,8 +243,9 @@ Always make commits with descriptive messages. Work independently and focus on y
             return agent, worktree_abs_path
 
         except Exception as e:
-            logger.error(f"Failed to create agent for {agent_name}: {e}")
-            raise
+            logger.error(f"[RESILIENT] Failed to create agent for {agent_name}: {e} - skipping this agent", exc_info=True)
+            # Don't crash - return None to skip this agent
+            return None, None
 
     def create_monitor_agent(self) -> Agent:
         """
@@ -407,6 +419,9 @@ their branches in the shared repository. Focus on branch management and merging.
 
     def cleanup(self):
         """Clean up all worktrees on shutdown."""
+        # Stop telemetry collector
+        shutdown_telemetry()
+
         if not self.worktrees:
             return
 
@@ -434,8 +449,23 @@ their branches in the shared repository. Focus on branch management and merging.
             feature_tasks = []
             worktree_paths = []
 
+            # Check if we have tasks to process
+            if not self.tasks_config:
+                logger.warning("[RESILIENT] No tasks loaded - orchestrator will stay alive but idle")
+                logger.info("Waiting for tasks to be added...")
+                # Keep orchestrator alive but don't crash
+                import time
+                while self.running:
+                    time.sleep(10)
+                    logger.info("[RESILIENT] Still waiting for tasks...")
+                return None
+
             for feature_config in self.tasks_config:
                 agent, worktree_path = self.create_feature_agent(feature_config)
+                # Skip agents that failed to create
+                if agent is None:
+                    logger.warning(f"[RESILIENT] Skipping agent for {feature_config.get('name', 'unknown')}")
+                    continue
                 task = self.create_feature_task(agent, feature_config, worktree_path)
                 feature_agents.append(agent)
                 feature_tasks.append(task)
@@ -453,6 +483,35 @@ their branches in the shared repository. Focus on branch management and merging.
             logger.info(f"Created 1 monitor agent (working in main repo)")
             logger.info(f"Worktrees created at: {[str(p) for p in worktree_paths]}")
             logger.info(f"Starting crew with {len(all_tasks)} tasks in parallel")
+
+            # Initialize telemetry if team_id provided
+            if self.team_id:
+                try:
+                    # Extract agent names from feature configs
+                    agent_names = [fc.get("name", f"Agent-{idx}") for idx, fc in enumerate(self.tasks_config)]
+                    agent_names.append("Monitor")  # Add monitor agent
+
+                    # Initialize telemetry collector using global function
+                    api_url = os.getenv("CLAUDE_NINE_API_URL", "http://localhost:8000")
+                    collector = initialize_telemetry(
+                        team_id=self.team_id,
+                        agent_names=agent_names,
+                        api_url=api_url,
+                        check_interval=2
+                    )
+                    logger.info(f"Started telemetry collection for team {self.team_id}")
+                    
+                    # Add initial activity logs for each agent
+                    for agent_name in agent_names:
+                        collector.add_activity_log(
+                            agent_name=agent_name,
+                            level="info",
+                            message=f"Agent {agent_name} created and initialized",
+                            source="orchestrator"
+                        )
+                except Exception as e:
+                    logger.warning(f"Failed to start telemetry: {e}")
+
 
             # Create and run crew
             crew = Crew(
@@ -567,6 +626,8 @@ def main():
     orchestrator = MultiAgentOrchestrator(
         config_path=args.config,
         tasks_path=args.tasks
+    ,
+        team_id=args.team_id
     )
     orchestrator.setup_signal_handlers()
 
