@@ -177,7 +177,8 @@ remove_venv() {
             echo -e "${YELLOW}Warning: Could not fully remove venv directory.${NC}"
             echo "Please manually delete the 'venv' folder and run install.sh again."
             echo "Or press Ctrl+C to cancel and manually delete it."
-            read -p "Press Enter to continue anyway (not recommended)..." dummy
+            echo -n "Press Enter to continue anyway (not recommended)... "
+            read dummy
         else
             echo -e "${GREEN}✓${NC} Virtual environment removed successfully"
         fi
@@ -233,7 +234,8 @@ if [ -f "api/.env" ] && grep -q "ANTHROPIC_API_KEY" api/.env 2>/dev/null; then
     EXISTING_KEY=$(grep "ANTHROPIC_API_KEY" api/.env | cut -d '=' -f2)
     if [ ! -z "$EXISTING_KEY" ] && [ "$EXISTING_KEY" != "your-api-key-here" ]; then
         echo -e "${GREEN}✓${NC} Existing API key found in api/.env"
-        read -p "Do you want to use the existing key? (y/n): " USE_EXISTING
+        echo -n "Do you want to use the existing key? (y/n):  "
+        read USE_EXISTING
         if [[ $USE_EXISTING =~ ^[Yy]$ ]]; then
             ANTHROPIC_API_KEY=$EXISTING_KEY
         fi
@@ -242,7 +244,8 @@ fi
 
 # Prompt for Anthropic API key if not set
 if [ -z "$ANTHROPIC_API_KEY" ]; then
-    read -p "Enter your Anthropic API key (or press Enter to set it later): " ANTHROPIC_API_KEY
+    echo -n "Enter your Anthropic API key (or press Enter to set it later): "
+    read ANTHROPIC_API_KEY
     if [ -z "$ANTHROPIC_API_KEY" ]; then
         ANTHROPIC_API_KEY="your-api-key-here"
         echo -e "${YELLOW}⚠${NC} API key not set. You'll need to update api/.env before using Claude-Nine."
@@ -256,30 +259,38 @@ echo ""
 
 # Azure DevOps
 echo -e "${BLUE}Azure DevOps${NC} (press Enter to skip)"
-read -p "Azure DevOps URL (e.g., https://dev.azure.com): " AZURE_DEVOPS_URL
+echo -n "Azure DevOps URL (e.g., https://dev.azure.com):  "
+read AZURE_DEVOPS_URL
 if [ ! -z "$AZURE_DEVOPS_URL" ]; then
-    read -p "Organization name: " AZURE_DEVOPS_ORGANIZATION
-    read -p "Personal Access Token: " AZURE_DEVOPS_TOKEN
+    echo -n "Organization name:  "
+    read AZURE_DEVOPS_ORGANIZATION
+    echo -n "Personal Access Token:  "
+    read AZURE_DEVOPS_TOKEN
 fi
 echo ""
 
 # Jira
 echo -e "${BLUE}Jira${NC} (press Enter to skip)"
-read -p "Jira URL (e.g., https://yourcompany.atlassian.net): " JIRA_URL
+echo -n "Jira URL (e.g., https://yourcompany.atlassian.net):  "
+read JIRA_URL
 if [ ! -z "$JIRA_URL" ]; then
-    read -p "Jira email: " JIRA_EMAIL
-    read -p "Jira API token: " JIRA_API_TOKEN
+    echo -n "Jira email:  "
+    read JIRA_EMAIL
+    echo -n "Jira API token:  "
+    read JIRA_API_TOKEN
 fi
 echo ""
 
 # GitHub
 echo -e "${BLUE}GitHub${NC} (press Enter to skip)"
-read -p "GitHub Personal Access Token: " GITHUB_TOKEN
+echo -n "GitHub Personal Access Token:  "
+read GITHUB_TOKEN
 echo ""
 
 # Linear
 echo -e "${BLUE}Linear${NC} (press Enter to skip)"
-read -p "Linear API key: " LINEAR_API_KEY
+echo -n "Linear API key:  "
+read LINEAR_API_KEY
 echo ""
 
 # Set up API
