@@ -153,16 +153,6 @@ export default function TeamsPage() {
                   >
                     View
                   </Link>
-                  {team.status === "stopped" && (
-                    <button className="flex-1 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm font-medium">
-                      Start
-                    </button>
-                  )}
-                  {team.status === "active" && (
-                    <button className="flex-1 bg-yellow-600 hover:bg-yellow-700 text-white px-4 py-2 rounded-md text-sm font-medium">
-                      Pause
-                    </button>
-                  )}
                 </div>
               </div>
             ))}
