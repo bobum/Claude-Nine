@@ -337,8 +337,8 @@ echo ""
 echo "Upgrading pip to latest version..."
 python -m pip install --upgrade pip --quiet
 
-echo "Installing API dependencies..."
-if pip install -r requirements.txt --quiet; then
+echo "Installing API dependencies (this may take 1-2 minutes)..."
+if pip install -r requirements.txt; then
     echo -e "${GREEN}✓${NC} API dependencies installed"
 else
     echo -e "${RED}✗${NC} Failed to install API dependencies"
@@ -355,8 +355,8 @@ echo ""
 
 cd claude-multi-agent-orchestrator
 
-echo "Installing orchestrator dependencies (CrewAI, GitPython, etc.)..."
-if pip install -r requirements.txt --quiet; then
+echo "Installing orchestrator dependencies (this may take 2-5 minutes, CrewAI has many dependencies)..."
+if pip install -r requirements.txt; then
     echo -e "${GREEN}✓${NC} Orchestrator dependencies installed"
 else
     echo -e "${RED}✗${NC} Failed to install orchestrator dependencies"
