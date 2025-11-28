@@ -188,6 +188,8 @@ async def start_team(
     """Start a team (TEST MODE: sends mock telemetry instead of running orchestrator)"""
     from datetime import datetime
     from ..websocket import notify_agent_telemetry
+    import asyncio
+    import random
     
     db_team = db.query(Team).filter(Team.id == team_id).first()
     if not db_team:
@@ -232,67 +234,17 @@ async def start_team(
     db_team.status = "active"
     db.commit()
 
-    # TEMPORARY TEST MODE: Send mock telemetry for each agent instead of running orchestrator
-    # TODO: Uncomment this when ready for production:
-    # from ..services.orchestrator_service import get_orchestrator_service
-    # orch_service = get_orchestrator_service()
-    # result = orch_service.start_team(team_id, db)
-    
-    # Send mock telemetry for each agent
-    for idx, agent in enumerate(db_team.agents, 1):
-        mock_data = {
-            "agent_name": agent.name,
-            "test_counter": idx,
-            "process_metrics": {
-                "pid": 12345 + idx,
-                "cpu_percent": 15.5 + (idx * 2),
-                "memory_mb": 256.0 + (idx * 10),
-                "threads": 8,
-                "status": "running"
-            },
-            "token_usage": {
-                "model": "claude-sonnet-4-5",
-                "input_tokens": 1000 * idx,
-                "output_tokens": 500 * idx,
-                "total_tokens": 1500 * idx,
-                "cost_usd": 0.01 * idx
-            },
-            "git_activities": [
-                {
-                    "operation": "commit",
-                    "branch": "feature/test",
-                    "message": f"Test commit from {agent.name}",
-                    "files_changed": 3,
-                    "timestamp": datetime.utcnow().isoformat(),
-                    "agent_name": agent.name
-                }
-            ],
-            "activity_logs": [
-                {
-                    "timestamp": datetime.utcnow().isoformat(),
-                    "level": "info",
-                    "message": f"{agent.name} started working on task",
-                    "source": "test_mode",
-                    "agent_name": agent.name
-                }
-            ],
-            "timestamp": datetime.utcnow().isoformat()
-        }
-        
-        # Broadcast via WebSocket
-        await notify_agent_telemetry(
-            agent_id=agent.name,
-            team_id=str(team_id),
-            event="metrics_update",
-            data=mock_data
-        )
+    # Start the real orchestrator
+    from ..services.orchestrator_service import get_orchestrator_service
+    orch_service = get_orchestrator_service()
+    result = orch_service.start_team(team_id, db)
 
     return {
-        "message": "Team started successfully (TEST MODE: mock telemetry sent)",
+        "message": "Team started successfully",
         "team_id": str(team_id),
         "agents_count": len(db_team.agents),
         "queued_work_count": len(queued_items),
-        "orchestrator_status": "test_mode",
+        "orchestrator_status": result.get("status", "unknown"),
         "status": "active"
     }
 

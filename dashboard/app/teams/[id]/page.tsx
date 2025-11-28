@@ -558,7 +558,7 @@ export default function TeamDetailPage() {
               <p className="text-gray-500 text-center py-8">No work items</p>
             ) : (
               <div className="space-y-3">
-                {team.work_items.map((item) => {
+                {[...team.work_items].reverse().map((item) => {
                   const isExpanded = expandedWorkItem === item.id;
                   return (
                     <div
