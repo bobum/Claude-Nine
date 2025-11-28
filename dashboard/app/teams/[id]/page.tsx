@@ -217,30 +217,6 @@ export default function TeamDetailPage() {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto py-8 px-6">
-        {/* Team Info */}
-        <div className="bg-white rounded-lg shadow p-6 mb-6">
-          <div className="flex justify-between items-start">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900 mb-2">
-                {team.name}
-              </h1>
-              <p className="text-gray-600 mb-4">{team.product}</p>
-              <div className="flex gap-4 text-sm text-gray-500">
-                <span>📁 {team.repo_path}</span>
-                <span>🌿 {team.main_branch}</span>
-              </div>
-            </div>
-            <span
-              className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(
-                team.status
-              )}`}
-            >
-              {team.status}
-            </span>
-          </div>
-        </div>
-
-
         {/* START Button Requirements Info */}
         {readiness && (
           <div className="bg-blue-50 border-l-4 border-blue-400 p-6 mb-6 rounded-lg">
@@ -300,6 +276,28 @@ export default function TeamDetailPage() {
             </div>
           </div>
         )}
+
+        <div className="bg-white rounded-lg shadow p-6 mb-6">
+          <div className="flex justify-between items-start">
+            <div>
+              <h1 className="text-3xl font-bold text-gray-900 mb-2">
+                {team.name}
+              </h1>
+              <p className="text-gray-600 mb-4">{team.product}</p>
+              <div className="flex gap-4 text-sm text-gray-500">
+                <span>📁 {team.repo_path}</span>
+                <span>🌿 {team.main_branch}</span>
+              </div>
+            </div>
+            <span
+              className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(
+                team.status
+              )}`}
+            >
+              {team.status}
+            </span>
+          </div>
+        </div>
 
         {/* Agent Telemetry Grid */}
         {team.status === "active" && team.agents.length > 0 && (
