@@ -32,6 +32,7 @@ export default function TeamDetailPage() {
   const [newAgent, setNewAgent] = useState({ name: "", role: "", goal: "" });
   const [agentTelemetry, setAgentTelemetry] = useState<Record<string, AgentTelemetry>>({});
   const [showAddWorkItem, setShowAddWorkItem] = useState(false);
+  const [expandedWorkItem, setExpandedWorkItem] = useState<string | null>(null);
   const [newWorkItem, setNewWorkItem] = useState({
     external_id: "",
     source: "manual" as const,
@@ -554,41 +555,92 @@ export default function TeamDetailPage() {
               <p className="text-gray-500 text-center py-8">No work items</p>
             ) : (
               <div className="space-y-3">
-                {team.work_items.map((item) => (
-                  <div
-                    key={item.id}
-                    className="border rounded p-4 hover:bg-gray-50"
-                  >
-                    <div className="flex justify-between items-start mb-2">
-                      <div className="flex-1">
-                        <span className="text-xs text-gray-500">
-                          {item.source} #{item.external_id}
-                        </span>
-                        <h3 className="font-semibold">{item.title}</h3>
+                {team.work_items.map((item) => {
+                  const isExpanded = expandedWorkItem === item.id;
+                  return (
+                    <div
+                      key={item.id}
+                      onClick={() => setExpandedWorkItem(isExpanded ? null : item.id)}
+                      className="border rounded p-4 hover:bg-gray-50 cursor-pointer transition-all"
+                    >
+                      <div className="flex justify-between items-start mb-2">
+                        <div className="flex-1">
+                          <span className="text-xs text-gray-500">
+                            {item.source} #{item.external_id}
+                          </span>
+                          <h3 className="font-semibold">{item.title}</h3>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`px-2 py-1 rounded text-xs font-medium ${getStatusColor(
+                              item.status
+                            )}`}
+                          >
+                            {item.status}
+                          </span>
+                          <span className="text-gray-400">
+                            {isExpanded ? '▼' : '▶'}
+                          </span>
+                        </div>
                       </div>
-                      <span
-                        className={`px-2 py-1 rounded text-xs font-medium ${getStatusColor(
-                          item.status
-                        )}`}
-                      >
-                        {item.status}
-                      </span>
-                    </div>
-                    {item.description && (
-                      <p className="text-sm text-gray-600 mb-2">
-                        {item.description.substring(0, 100)}...
-                      </p>
-                    )}
-                    <div className="flex gap-4 text-xs text-gray-500">
-                      {item.priority !== null && (
-                        <span>Priority: {item.priority}</span>
+                      
+                      {!isExpanded && item.description && (
+                        <p className="text-sm text-gray-600 mb-2">
+                          {item.description.substring(0, 100)}...
+                        </p>
                       )}
-                      {item.story_points && (
-                        <span>Points: {item.story_points}</span>
+                      
+                      {isExpanded && (
+                        <div className="mt-4 space-y-3 bg-gray-50 p-4 rounded">
+                          <div>
+                            <h4 className="text-sm font-semibold text-gray-700 mb-1">Description</h4>
+                            <p className="text-sm text-gray-600 whitespace-pre-wrap">
+                              {item.description || 'No description'}
+                            </p>
+                          </div>
+                          
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <h4 className="text-sm font-semibold text-gray-700 mb-1">Source</h4>
+                              <p className="text-sm text-gray-600">{item.source}</p>
+                            </div>
+                            <div>
+                              <h4 className="text-sm font-semibold text-gray-700 mb-1">External ID</h4>
+                              <p className="text-sm text-gray-600">{item.external_id}</p>
+                            </div>
+                            {item.priority !== null && (
+                              <div>
+                                <h4 className="text-sm font-semibold text-gray-700 mb-1">Priority</h4>
+                                <p className="text-sm text-gray-600">{item.priority}</p>
+                              </div>
+                            )}
+                            {item.story_points && (
+                              <div>
+                                <h4 className="text-sm font-semibold text-gray-700 mb-1">Story Points</h4>
+                                <p className="text-sm text-gray-600">{item.story_points}</p>
+                              </div>
+                            )}
+                            <div>
+                              <h4 className="text-sm font-semibold text-gray-700 mb-1">Status</h4>
+                              <p className="text-sm text-gray-600">{item.status}</p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {!isExpanded && (
+                        <div className="flex gap-4 text-xs text-gray-500 mt-2">
+                          {item.priority !== null && (
+                            <span>Priority: {item.priority}</span>
+                          )}
+                          {item.story_points && (
+                            <span>Points: {item.story_points}</span>
+                          )}
+                        </div>
                       )}
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
