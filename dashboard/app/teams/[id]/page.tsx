@@ -29,7 +29,7 @@ export default function TeamDetailPage() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [showAddAgent, setShowAddAgent] = useState(false);
-  const [newAgent, setNewAgent] = useState({ name: "", persona_type: "developer", role: "", goal: "" });
+  const [newAgent, setNewAgent] = useState({ name: "", persona_type: "dev", role: "", goal: "" });
   const [agentTelemetry, setAgentTelemetry] = useState<Record<string, AgentTelemetry>>({});
   const [showAddWorkItem, setShowAddWorkItem] = useState(false);
   const [expandedWorkItem, setExpandedWorkItem] = useState<string | null>(null);
@@ -114,7 +114,7 @@ export default function TeamDetailPage() {
     e.preventDefault();
     try {
       await addAgentToTeam(teamId, newAgent);
-      setNewAgent({ name: "", persona_type: "developer", role: "", goal: "" });
+      setNewAgent({ name: "", persona_type: "dev", role: "", goal: "" });
       setShowAddAgent(false);
       await loadTeam();
     } catch (error) {
@@ -398,11 +398,9 @@ export default function TeamDetailPage() {
                     }
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
                   >
-                    <option value="developer">Developer</option>
-                    <option value="architect">Architect</option>
-                    <option value="tester">Tester</option>
-                    <option value="reviewer">Reviewer</option>
-                    <option value="devops">DevOps</option>
+                    <option value="dev">Developer</option>
+                    <option value="monitor">Monitor</option>
+                    <option value="orchestrator">Orchestrator</option>
                   </select>
                   <input
                     type="text"
