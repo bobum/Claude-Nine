@@ -25,7 +25,7 @@ The API URL is already configured for local development.
 npm run dev
 ```
 
-Visit http://localhost:3000
+Visit http://localhost:3001
 
 ## Features
 

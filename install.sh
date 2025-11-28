@@ -521,8 +521,8 @@ else
 fi
 
 # Start Dashboard in production mode
-echo "Starting Dashboard on http://localhost:3000..."
-npm start > ../logs/dashboard.log 2>&1 &
+echo "Starting Dashboard on http://localhost:3001..."
+PORT=3001 npm start > ../logs/dashboard.log 2>&1 &
 DASHBOARD_PID=\$!
 cd ..
 
@@ -550,7 +550,7 @@ while [ \$WAIT_COUNT -lt \$MAX_WAIT ]; do
         exit 1
     fi
 
-    if curl -s http://localhost:3000 > /dev/null 2>&1; then
+    if curl -s http://localhost:3001 > /dev/null 2>&1; then
         DASHBOARD_READY=true
         break
     fi
@@ -574,7 +574,7 @@ fi
 echo ""
 echo -e "\${GREEN}✓ Claude-Nine is running!\${NC}"
 echo ""
-echo "  Dashboard: http://localhost:3000"
+echo "  Dashboard: http://localhost:3001"
 echo "  API: http://localhost:8000"
 echo "  API Docs: http://localhost:8000/docs"
 echo ""
@@ -692,7 +692,7 @@ source activate.sh
 ./start.sh
 ```
 
-This automatically activates the venv, starts both the API server and dashboard. Open http://localhost:3000 in your browser.
+This automatically activates the venv, starts both the API server and dashboard. Open http://localhost:3001 in your browser.
 
 ### Stop Claude-Nine
 ```bash
@@ -703,7 +703,7 @@ Or press `Ctrl+C` in the terminal where you ran `./start.sh`.
 
 ## What's Running?
 
-- **Dashboard**: http://localhost:3000 - Your main UI
+- **Dashboard**: http://localhost:3001 - Your main UI
 - **API**: http://localhost:8000 - Backend server
 - **API Docs**: http://localhost:8000/docs - Interactive API documentation
 
@@ -729,7 +729,7 @@ deactivate
 
 ## First Steps
 
-1. **Visit the Dashboard**: http://localhost:3000
+1. **Visit the Dashboard**: http://localhost:3001
 2. **Follow the Tutorial**: An interactive tour will guide you through features
 3. **Create Your First Team**:
    - Click "View Teams" → "+ New Team"
@@ -759,14 +759,14 @@ Your data is stored in `api/claude_nine.db` (SQLite file).
 ## Troubleshooting
 
 ### Port Already in Use
-If port 8000 or 3000 is already taken:
+If port 8000 or 3001 is already taken:
 ```bash
 # Kill existing process
 ./stop.sh
 
 # Or manually:
 lsof -ti:8000 | xargs kill -9
-lsof -ti:3000 | xargs kill -9
+lsof -ti:3001 | xargs kill -9
 ```
 
 ### API Not Starting
@@ -838,7 +838,7 @@ echo "1. Start Claude-Nine:"
 echo -e "   ${YELLOW}./start.sh${NC}"
 echo ""
 echo "2. Open your browser to:"
-echo -e "   ${YELLOW}http://localhost:3000${NC}"
+echo -e "   ${YELLOW}http://localhost:3001${NC}"
 echo ""
 echo "3. Follow the interactive tutorial to get started!"
 echo ""
