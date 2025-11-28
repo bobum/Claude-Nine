@@ -404,7 +404,7 @@ export default function WorkItemsPage() {
             )}
 
             <div className="space-y-4">
-              {workItems.map((item) => (
+              {[...workItems].reverse().map((item) => (
                 <div
                   key={item.id}
                   className={`bg-white rounded-lg shadow p-6 transition-all ${

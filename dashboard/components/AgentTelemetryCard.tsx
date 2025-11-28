@@ -51,15 +51,28 @@ export default function AgentTelemetryCard({
             <p className="text-sm text-gray-600 dark:text-gray-400">
               {agent.role}
             </p>
+            {telemetry && telemetry.timestamp && (
+              <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                Last update: {new Date(telemetry.timestamp).toLocaleTimeString()}
+              </p>
+            )}
           </div>
         </div>
-        <span
-          className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(
-            agent.status
-          )}`}
-        >
-          {agent.status}
-        </span>
+        <div className="flex items-center gap-2">
+          {telemetry && (
+            <div className="flex items-center gap-1 px-2 py-1 bg-green-100 dark:bg-green-900 rounded-full">
+              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+              <span className="text-xs font-medium text-green-700 dark:text-green-300">LIVE</span>
+            </div>
+          )}
+          <span
+            className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(
+              agent.status
+            )}`}
+          >
+            {agent.status}
+          </span>
+        </div>
       </div>
 
       {/* Process Metrics */}
