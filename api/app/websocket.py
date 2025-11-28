@@ -126,3 +126,4 @@ async def notify_agent_telemetry(agent_id: str, team_id: str, event: str, data: 
         "timestamp": asyncio.get_event_loop().time()
     }
     await manager.send_to_team(team_id, message)
+    await manager.broadcast(message)
