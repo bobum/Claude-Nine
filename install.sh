@@ -50,6 +50,7 @@ spin_with_progress() {
     local spin_chars='|/-\'
     local i=0
     local last_pkg=""
+    local line_width=70
 
     # Hide cursor
     tput civis 2>/dev/null || true
@@ -57,8 +58,11 @@ spin_with_progress() {
     while kill -0 $pid 2>/dev/null; do
         # Get current package being installed from log
         if [ -f "$log_file" ]; then
-            # Look for pip style "Collecting package" or npm style "added X packages"
-            local current=$(grep -E "^(Collecting|Installing|Downloading|Building|added|npm warn|reify:)" "$log_file" 2>/dev/null | tail -1 | sed 's/reify:/Installing:/' | head -c 50)
+            # Look for pip style "Collecting package" or npm style output
+            local current=$(grep -oE "Collecting [a-zA-Z0-9_-]+" "$log_file" 2>/dev/null | tail -1)
+            if [ -z "$current" ]; then
+                current=$(grep -oE "Downloading [a-zA-Z0-9_-]+" "$log_file" 2>/dev/null | tail -1)
+            fi
             if [ -n "$current" ] && [ "$current" != "$last_pkg" ]; then
                 last_pkg="$current"
             fi
@@ -67,12 +71,16 @@ spin_with_progress() {
         local char="${spin_chars:$i:1}"
         i=$(( (i + 1) % 4 ))
 
-        # Use ANSI escape: move to column 0 and clear line
+        # Build the status line
+        local status_line
         if [ -n "$last_pkg" ]; then
-            echo -ne "\r\033[K${YELLOW}[${char}]${NC} ${message}: ${last_pkg}"
+            status_line="[${char}] ${message}: ${last_pkg}"
         else
-            echo -ne "\r\033[K${YELLOW}[${char}]${NC} ${message}..."
+            status_line="[${char}] ${message}..."
         fi
+
+        # Pad to fixed width to overwrite previous content
+        printf "\r%-${line_width}s" "$status_line"
 
         sleep 0.15
     done
@@ -80,8 +88,8 @@ spin_with_progress() {
     # Show cursor again
     tput cnorm 2>/dev/null || true
 
-    # Clear the line completely
-    echo -ne "\r\033[K"
+    # Clear the line with spaces
+    printf "\r%-${line_width}s\r" " "
 }
 
 echo -e "${BLUE}[1/7] Checking Prerequisites...${NC}"
