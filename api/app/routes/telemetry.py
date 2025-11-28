@@ -9,6 +9,9 @@ from ..websocket import notify_agent_telemetry
 
 router = APIRouter()
 
+# Test counter for mock telemetry - TEMPORARY FOR TESTING
+_test_counter = 0
+
 
 class ProcessMetrics(BaseModel):
     """Process resource usage metrics"""
@@ -102,15 +105,74 @@ async def receive_agent_telemetry(
 
 
 @router.get("/agent/{agent_name}")
-async def get_agent_telemetry(agent_name: str):
+async def get_agent_telemetry(
+    agent_name: str,
+    team_id: str = "f398aeda-5257-45ec-a09f-b02d0de402ae"
+):
     """
-    Get current telemetry data for a specific agent.
+    TEMPORARY TEST MODE: Sends mock telemetry via WebSocket to test the connection.
 
-    Note: This is a placeholder for future implementation where we might
-    cache telemetry data in memory or database.
+    This allows testing WebSocket delivery without running the full orchestrator.
+    Call this endpoint (e.g., http://localhost:8000/api/telemetry/agent/DevAgent)
+    and watch the dashboard to see if the mock data appears in the agent card.
+
+    TODO: Replace with actual cached telemetry data retrieval in production.
     """
+    global _test_counter
+    _test_counter += 1
+
+    # Create mock telemetry data
+    mock_data = {
+        "agent_name": agent_name,
+        "test_counter": _test_counter,
+        "process_metrics": {
+            "pid": 12345,
+            "cpu_percent": 15.5 + (_test_counter % 10),
+            "memory_mb": 256.0 + (_test_counter * 2),
+            "threads": 8,
+            "status": "running"
+        },
+        "token_usage": {
+            "model": "claude-sonnet-4-5",
+            "input_tokens": 1000 * _test_counter,
+            "output_tokens": 500 * _test_counter,
+            "total_tokens": 1500 * _test_counter,
+            "cost_usd": 0.01 * _test_counter
+        },
+        "git_activities": [
+            {
+                "operation": "commit",
+                "branch": "feature/test",
+                "message": f"Test commit #{_test_counter}",
+                "files_changed": 3,
+                "timestamp": datetime.utcnow().isoformat(),
+                "agent_name": agent_name
+            }
+        ],
+        "activity_logs": [
+            {
+                "timestamp": datetime.utcnow().isoformat(),
+                "level": "info",
+                "message": f"Test activity log entry #{_test_counter}",
+                "source": "test_endpoint",
+                "agent_name": agent_name
+            }
+        ],
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+    # Broadcast via WebSocket
+    await notify_agent_telemetry(
+        agent_id=agent_name,
+        team_id=team_id,
+        event="metrics_update",
+        data=mock_data
+    )
+
     return {
-        "status": "not_implemented",
-        "message": "Telemetry data is currently only available via WebSocket",
-        "agent_name": agent_name
+        "status": "test_mode",
+        "message": f"Mock telemetry #{_test_counter} sent via WebSocket for agent {agent_name}",
+        "counter": _test_counter,
+        "team_id": team_id,
+        "data": mock_data
     }
