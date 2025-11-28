@@ -418,10 +418,11 @@ class OrchestratorService:
             branch_name = f"feature/{work_item.external_id or work_item.id}"
             branch_name = branch_name.replace(" ", "-").replace("/", "-").lower()
 
-            yaml_content += f"  - name: {work_item.external_id or work_item.id}\n"
+            yaml_content += f"  - name: {agent.name}\n"
             yaml_content += f"    role: {agent.role}\n"
             yaml_content += f"    goal: {agent.goal or work_item.title}\n"
             yaml_content += f"    branch: {branch_name}\n"
+            yaml_content += f"    work_item_id: {work_item.external_id or work_item.id}\n"
             yaml_content += f"    description: |\n"
             yaml_content += f"      {work_item.title}\n"
             if work_item.description:
