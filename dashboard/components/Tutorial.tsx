@@ -189,7 +189,7 @@ export const homeTutorialSteps: Step[] = [
       <div>
         <h3 className="font-bold mb-1">Real-time Monitoring</h3>
         <p>
-          Monitor your teams and agents in real-time. See what they're working on,
+          Monitor your teams and agents in real-time. See what they&apos;re working on,
           track progress, and view metrics.
         </p>
       </div>
@@ -232,7 +232,7 @@ export const teamsTutorialSteps: Step[] = [
       <div>
         <h3 className="font-bold mb-1">Team Card</h3>
         <p>
-          Each card shows the team's status, product, and quick actions. Click "View"
+          Each card shows the team&apos;s status, product, and quick actions. Click &quot;View&quot;
           to see team details and manage agents.
         </p>
       </div>
@@ -285,7 +285,7 @@ export const workItemsTutorialSteps: Step[] = [
         <h3 className="font-bold mb-1">Bulk Assign</h3>
         <p>
           This button appears when you have items selected. Click it to assign all
-          selected items to a team's queue at once!
+          selected items to a team&apos;s queue at once!
         </p>
       </div>
     ),
