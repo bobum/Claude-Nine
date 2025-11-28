@@ -24,7 +24,11 @@ from pathlib import Path
 from crewai import Agent, Task, Crew, Process, LLM
 from git_tools import create_git_tools
 from git_operations import GitOperations
-from telemetry_collector import TelemetryCollector
+from telemetry_collector import (
+    initialize_telemetry,
+    get_telemetry_collector,
+    shutdown_telemetry
+)
 
 
 # Configure logging
@@ -82,7 +86,6 @@ class MultiAgentOrchestrator:
 
         # Telemetry
         self.team_id = team_id
-        self.telemetry_collector: Optional[TelemetryCollector] = None
 
         # Set up API key
         if 'anthropic_api_key' in self.config and self.config['anthropic_api_key']:
@@ -417,12 +420,7 @@ their branches in the shared repository. Focus on branch management and merging.
     def cleanup(self):
         """Clean up all worktrees on shutdown."""
         # Stop telemetry collector
-        if self.telemetry_collector:
-            try:
-                self.telemetry_collector.stop()
-                logger.info("Telemetry collector stopped")
-            except Exception as e:
-                logger.warning(f"Error stopping telemetry: {e}")
+        shutdown_telemetry()
 
         if not self.worktrees:
             return
@@ -493,16 +491,24 @@ their branches in the shared repository. Focus on branch management and merging.
                     agent_names = [fc.get("name", f"Agent-{idx}") for idx, fc in enumerate(self.tasks_config)]
                     agent_names.append("Monitor")  # Add monitor agent
 
-                    # Initialize telemetry collector
+                    # Initialize telemetry collector using global function
                     api_url = os.getenv("CLAUDE_NINE_API_URL", "http://localhost:8000")
-                    self.telemetry_collector = TelemetryCollector(
+                    collector = initialize_telemetry(
                         team_id=self.team_id,
                         agent_names=agent_names,
                         api_url=api_url,
                         check_interval=2
                     )
-                    self.telemetry_collector.start()
                     logger.info(f"Started telemetry collection for team {self.team_id}")
+                    
+                    # Add initial activity logs for each agent
+                    for agent_name in agent_names:
+                        collector.add_activity_log(
+                            agent_name=agent_name,
+                            level="info",
+                            message=f"Agent {agent_name} created and initialized",
+                            source="orchestrator"
+                        )
                 except Exception as e:
                     logger.warning(f"Failed to start telemetry: {e}")
 

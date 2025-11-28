@@ -385,3 +385,171 @@ class TelemetryCollector:
                 len(logs) for logs in self.agent_activity_logs.values()
             )
         }
+
+    def track_token_usage(
+        self,
+        agent_name: str,
+        model: str,
+        input_tokens: int,
+        output_tokens: int,
+        cost_usd: float
+    ):
+        """
+        Manually track token usage for an agent.
+
+        Args:
+            agent_name: Name of the agent
+            model: Model name used
+            input_tokens: Number of input tokens
+            output_tokens: Number of output tokens
+            cost_usd: Cost in USD
+        """
+        if agent_name not in self.agent_token_usage:
+            self.agent_token_usage[agent_name] = TokenUsage(
+                model=model,
+                input_tokens=0,
+                output_tokens=0,
+                total_tokens=0,
+                cost_usd=0.0
+            )
+
+        current = self.agent_token_usage[agent_name]
+        current.model = model  # Update to latest model
+        current.input_tokens += input_tokens
+        current.output_tokens += output_tokens
+        current.total_tokens += (input_tokens + output_tokens)
+        current.cost_usd += cost_usd
+
+        logger.debug(
+            f"Tracked {input_tokens + output_tokens} tokens for {agent_name} "
+            f"(${cost_usd:.6f})"
+        )
+
+    def track_git_activity(
+        self,
+        agent_name: str,
+        operation: str,
+        branch: Optional[str] = None,
+        message: Optional[str] = None,
+        files_changed: Optional[int] = None
+    ):
+        """
+        Manually track a git activity for an agent.
+
+        Args:
+            agent_name: Name of the agent
+            operation: Git operation type (branch_create, commit, checkout, merge)
+            branch: Branch name (optional)
+            message: Commit message (optional)
+            files_changed: Number of files changed (optional)
+        """
+        activity = GitActivity(
+            operation=operation,
+            branch=branch,
+            message=message,
+            files_changed=files_changed,
+            timestamp=datetime.now(UTC).isoformat(),
+            agent_name=agent_name
+        )
+
+        self.agent_git_activities[agent_name].append(activity)
+
+        # Keep only last 20 per agent
+        if len(self.agent_git_activities[agent_name]) > 20:
+            self.agent_git_activities[agent_name].pop(0)
+
+        logger.debug(f"Tracked git activity for {agent_name}: {operation}")
+
+    def add_activity_log(
+        self,
+        agent_name: str,
+        level: str,
+        message: str,
+        source: str = "orchestrator"
+    ):
+        """
+        Manually add an activity log entry for an agent.
+
+        Args:
+            agent_name: Name of the agent
+            level: Log level (info, warning, error)
+            message: Log message
+            source: Source of the log (orchestrator, git, llm, system)
+        """
+        activity = ActivityLog(
+            timestamp=datetime.now(UTC).isoformat(),
+            level=level,
+            message=message[:500],  # Truncate long messages
+            source=source,
+            agent_name=agent_name
+        )
+
+        self.agent_activity_logs[agent_name].append(activity)
+
+        # Keep only last 100 per agent
+        if len(self.agent_activity_logs[agent_name]) > 100:
+            self.agent_activity_logs[agent_name].pop(0)
+
+        logger.debug(f"Added activity log for {agent_name}: [{level}] {message[:50]}")
+
+
+# Global telemetry collector instance
+_global_collector: Optional[TelemetryCollector] = None
+
+
+def initialize_telemetry(
+    team_id: str,
+    agent_names: List[str],
+    api_url: str = "http://localhost:8000",
+    check_interval: int = 2
+) -> TelemetryCollector:
+    """
+    Initialize and start the global telemetry collector.
+
+    Args:
+        team_id: Team ID for API reporting
+        agent_names: List of agent names to track
+        api_url: URL of Claude-Nine API
+        check_interval: How often to collect and report (seconds)
+
+    Returns:
+        TelemetryCollector: The initialized collector instance
+    """
+    global _global_collector
+
+    if _global_collector is not None:
+        logger.warning("Telemetry collector already initialized")
+        return _global_collector
+
+    _global_collector = TelemetryCollector(
+        team_id=team_id,
+        agent_names=agent_names,
+        api_url=api_url,
+        check_interval=check_interval
+    )
+    _global_collector.start()
+
+    logger.info(f"Global telemetry collector initialized for team {team_id}")
+    return _global_collector
+
+
+def get_telemetry_collector() -> Optional[TelemetryCollector]:
+    """
+    Get the global telemetry collector instance.
+
+    Returns:
+        Optional[TelemetryCollector]: The collector instance, or None if not initialized
+    """
+    return _global_collector
+
+
+def shutdown_telemetry():
+    """Shutdown the global telemetry collector."""
+    global _global_collector
+
+    if _global_collector is None:
+        return
+
+    _global_collector.stop()
+    _global_collector = None
+    logger.info("Global telemetry collector shutdown")
