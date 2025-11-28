@@ -171,7 +171,7 @@ export default function TeamDetailPage() {
             {team.status === "stopped" && (
               <button
                 onClick={() => handleAction("start")}
-                disabled={actionLoading}
+                disabled={actionLoading || !readiness?.is_ready}
                 className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded-md text-sm font-medium disabled:opacity-50"
               >
                 Start
@@ -240,44 +240,9 @@ export default function TeamDetailPage() {
           </div>
         </div>
 
-        {/* Team Readiness Status */}
-        {readiness && !readiness.is_ready && (
-          <div className="bg-yellow-50 border-l-4 border-yellow-400 p-6 mb-6 rounded-lg">
-            <div className="flex items-start">
-              <div className="flex-shrink-0">
-                <svg
-                  className="h-6 w-6 text-yellow-400"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                  />
-                </svg>
-              </div>
-              <div className="ml-4 flex-1">
-                <h3 className="text-lg font-medium text-yellow-800 mb-2">
-                  Team Not Ready to Start
-                </h3>
-                <div className="text-sm text-yellow-700 space-y-2">
-                  <p className="font-medium">Issues to resolve:</p>
-                  <ul className="list-disc list-inside space-y-1">
-                    {readiness.issues.map((issue, idx) => (
-                      <li key={idx}>{issue}</li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
 
-        {/* Execution Status Info */}
-        {team.status === "active" && readiness && (
+        {/* START Button Requirements Info */}
+        {readiness && (
           <div className="bg-blue-50 border-l-4 border-blue-400 p-6 mb-6 rounded-lg">
             <div className="flex items-start">
               <div className="flex-shrink-0">
@@ -297,34 +262,38 @@ export default function TeamDetailPage() {
               </div>
               <div className="ml-4 flex-1">
                 <h3 className="text-lg font-medium text-blue-800 mb-2">
-                  Team Marked as Active
+                  START Button Requirements
                 </h3>
                 <div className="text-sm text-blue-700 space-y-2">
-                  <p>
-                    This team is configured and ready, but agent execution is
-                    not yet implemented in the UI.
+                  <p className="mb-3">
+                    To enable the START button, the following requirements must be met:
                   </p>
-                  <div className="bg-white p-3 rounded mt-3">
-                    <p className="font-medium mb-2">Ready to execute:</p>
-                    <ul className="space-y-1">
-                      <li>✅ {readiness.agents_count} agent(s) configured</li>
-                      <li>
-                        ✅ {readiness.queued_work_count} work item(s) queued
-                      </li>
-                      <li>⏳ Waiting for orchestrator integration</li>
-                    </ul>
-                  </div>
-                  {readiness.queued_work_items.length > 0 && (
-                    <div className="mt-3">
-                      <p className="font-medium mb-2">Queued work items:</p>
-                      <ul className="space-y-1">
-                        {readiness.queued_work_items.map((item) => (
-                          <li key={item.id} className="text-xs">
-                            • {item.title}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
+                  <ul className="space-y-2">
+                    <li className="flex items-center gap-2">
+                      <span className="text-lg">
+                        {readiness.agents_count > 0 ? '✅' : '❌'}
+                      </span>
+                      <span>
+                        {readiness.agents_count > 0 
+                          ? `${readiness.agents_count} Dev agent(s) configured` 
+                          : 'Add at least one Dev agent'}
+                      </span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <span className="text-lg">
+                        {readiness.queued_work_count > 0 ? '✅' : '❌'}
+                      </span>
+                      <span>
+                        {readiness.queued_work_count > 0 
+                          ? `${readiness.queued_work_count} work item(s) queued` 
+                          : 'Add at least one work item to the queue'}
+                      </span>
+                    </li>
+                  </ul>
+                  {readiness.is_ready && (
+                    <p className="mt-3 font-medium text-green-700">
+                      ✅ All requirements met! You can now START the team.
+                    </p>
                   )}
                 </div>
               </div>
