@@ -24,10 +24,13 @@ activate.sh
 *.db
 *.db-journal
 
-# Test files
-test_*.py
-test_*.yaml
+# Test files (scratch/temporary - NOT test suites)
+/test_*.py
+/test_*.yaml
 *.bak
+# Allow actual test suites
+!api/tests/test_*.py
+!claude-multi-agent-orchestrator/tests/test_*.py
 
 # Claude Code workspace
 .claude/
