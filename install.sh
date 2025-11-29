@@ -190,6 +190,31 @@ else
     echo -e "${YELLOW}⚠${NC} Git not found - optional but recommended for version control"
 fi
 
+# Check GitHub CLI (required for automatic PR creation)
+if command_exists gh; then
+    GH_VERSION=$(gh --version | head -1)
+    echo -e "${GREEN}✓${NC} GitHub CLI found: $GH_VERSION"
+
+    # Check if gh is authenticated
+    if gh auth status >/dev/null 2>&1; then
+        echo -e "${GREEN}✓${NC} GitHub CLI is authenticated"
+    else
+        echo -e "${YELLOW}⚠${NC} GitHub CLI is not authenticated"
+        echo "  Run 'gh auth login' to authenticate for automatic PR creation"
+    fi
+else
+    echo -e "${RED}✗ GitHub CLI (gh) is required but not found${NC}"
+    echo ""
+    echo "  The orchestrator uses 'gh' to automatically create pull requests"
+    echo "  after merging feature branches."
+    echo ""
+    echo "  Install from: https://cli.github.com/"
+    echo ""
+    echo "  After installing, run: gh auth login"
+    echo ""
+    exit 1
+fi
+
 echo ""
 echo -e "${GREEN}All prerequisites met!${NC}"
 echo ""
