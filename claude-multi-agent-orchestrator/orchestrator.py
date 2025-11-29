@@ -292,8 +292,9 @@ Work independently and don't worry about other developers - you have your own wo
         task = Task(
             description=task_description,
             agent=agent,
-            expected_output=expected_output,
-            async_execution=True  # Parallel execution - all tasks run concurrently
+            expected_output=expected_output
+            # Note: async_execution removed - CrewAI now only allows one async task (the last one)
+            # Tasks will run sequentially within the crew
         )
 
         logger.info(f"Created task for feature: {feature_config['name']} on branch {branch_name}")
