@@ -21,9 +21,9 @@ from sqlalchemy.orm import Session
 import asyncio
 
 
-from ..models import Team, Agent, WorkItem
+from ..models import Team, WorkItem
 from ..database import SessionLocal
-from ..websocket import notify_agent_update, notify_work_item_update, notify_team_update
+from ..websocket import notify_work_item_update, notify_team_update
 from ..config import settings
 
 logger = logging.getLogger(__name__)
@@ -195,21 +195,6 @@ class OrchestratorService:
                 except RuntimeError:
                     pass  # Event loop may already be running
 
-            # Update agents to working status
-            for agent in team.agents:
-                agent.status = "working"
-                agent.last_activity = datetime.utcnow()
-                # Send WebSocket notification
-                try:
-                    asyncio.run(notify_agent_update(
-                        str(agent.id),
-                        str(team_id),
-                        "status_changed",
-                        {"status": "working", "last_activity": agent.last_activity.isoformat()}
-                    ))
-                except RuntimeError:
-                    pass  # Event loop may already be running
-
             db.commit()
 
             # Send team update notification
@@ -225,8 +210,7 @@ class OrchestratorService:
             return {
                 "status": "started",
                 "message": f"Orchestrator started for team {team.name}",
-                "work_items_count": len(work_items),
-                "agents_count": len(team.agents)
+                "work_items_count": len(work_items)
             }
 
         except Exception as e:
@@ -271,8 +255,7 @@ class OrchestratorService:
         # Update database status
         team = db.query(Team).filter(Team.id == team_id).first()
         if team:
-            for agent in team.agents:
-                agent.status = "idle"
+            team.status = "stopped"
             db.commit()
 
         return {
@@ -333,21 +316,6 @@ class OrchestratorService:
             if team:
                 team.status = "stopped"
 
-                # Update agents
-                for agent in team.agents:
-                    agent.status = "idle"
-                    agent.last_activity = datetime.utcnow()
-                    # Send WebSocket notification
-                    try:
-                        asyncio.run(notify_agent_update(
-                            str(agent.id),
-                            team_id_str,
-                            "status_changed",
-                            {"status": "idle", "last_activity": agent.last_activity.isoformat()}
-                        ))
-                    except RuntimeError:
-                        pass  # Event loop may already be running
-
                 # Update work items based on process result
                 if process.returncode == 0:
                     # Success - mark as completed
@@ -404,37 +372,44 @@ class OrchestratorService:
             db.close()
 
     def _generate_tasks_yaml(self, team: Team, work_items: List[WorkItem], db: Session) -> str:
-        """Generate YAML tasks configuration from database work items"""
-        yaml_content = "# Auto-generated tasks from database\n\n"
+        """Generate YAML tasks configuration from database work items.
+
+        Each work item becomes a feature task. The orchestrator will create
+        one agent per task dynamically - no pre-existing agents required.
+        """
+        yaml_content = "# Auto-generated tasks from database\n"
+        yaml_content += f"# Team: {team.name}\n"
+        yaml_content += f"# Work items: {len(work_items)}\n\n"
         yaml_content += "features:\n"
 
         for work_item in work_items:
-            # Find an available agent
-            agent = team.agents[0] if team.agents else None
-            if not agent:
-                raise ValueError("No agents available")
+            # Create a safe branch name from the work item external_id
+            external_id = work_item.external_id or str(work_item.id)[:8]
+            branch_name = f"feature/{external_id}".lower().replace(" ", "-")
 
-            # Create a safe branch name from the work item title
-            branch_name = f"feature/{work_item.external_id or work_item.id}"
-            branch_name = branch_name.replace(" ", "-").replace("/", "-").lower()
+            # Create a safe name for the feature (used as agent name)
+            feature_name = external_id.replace("-", "_").replace(" ", "_").lower()
 
-            yaml_content += f"  - name: {agent.name}\n"
-            yaml_content += f"    role: {agent.role}\n"
-            yaml_content += f"    goal: {agent.goal or work_item.title}\n"
+            yaml_content += f"  - name: {feature_name}\n"
             yaml_content += f"    branch: {branch_name}\n"
-            yaml_content += f"    work_item_id: {work_item.external_id or work_item.id}\n"
+            yaml_content += f"    work_item_id: {external_id}\n"
+            yaml_content += f"    role: Software Developer\n"
+            yaml_content += f"    goal: {work_item.title}\n"
             yaml_content += f"    description: |\n"
-            yaml_content += f"      {work_item.title}\n"
+            yaml_content += f"      Task: {work_item.title}\n"
+            yaml_content += f"      \n"
             if work_item.description:
                 for line in work_item.description.split('\n'):
                     yaml_content += f"      {line}\n"
             if work_item.acceptance_criteria:
-                yaml_content += f"\n      Acceptance Criteria:\n"
+                yaml_content += f"      \n"
+                yaml_content += f"      Acceptance Criteria:\n"
                 for line in work_item.acceptance_criteria.split('\n'):
                     yaml_content += f"      {line}\n"
             yaml_content += f"    expected_output: |\n"
             yaml_content += f"      Complete implementation of: {work_item.title}\n"
             yaml_content += f"      All code committed to branch {branch_name}\n"
+            yaml_content += f"      Ready for merge to {team.main_branch or 'main'}\n"
             yaml_content += "\n"
 
         return yaml_content
