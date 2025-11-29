@@ -80,23 +80,35 @@ Think of it as your **personal AI development team in a box**, complete with:
 ### 🎭 The Magic
 
 ```
-                    🎼 Orchestrator
-                         │
-        ┌────────────────┼────────────────┐
-        │                │                │
-    🤖 Agent 1       🤖 Agent 2       👁️ Monitor
-   (Auth System)   (API Logging)   (Conflict Resolver)
-        │                │                │
-        ▼                ▼                ▼
-    📁 Worktree 1    📁 Worktree 2    📚 Main Repo
-   (Isolated)       (Isolated)       (Overseer)
-        │                │                │
-        └────────────────┴────────────────┘
-                         │
-                    🗄️ Shared Git
-                         │
-                    ✨ Merged Features
+                         📋 Work Queue
+                    (3 items queued)
+                              │
+                    ┌─────────▼─────────┐
+                    │   🎼 Orchestrator  │
+                    │  Creates 1 agent   │
+                    │   per work item    │
+                    └─────────┬─────────┘
+                              │
+        ┌─────────────────────┼─────────────────────┐
+        │                     │                     │
+   🤖 Agent 1            🤖 Agent 2            🤖 Agent 3
+  (Auth System)        (API Logging)        (Swagger Docs)
+        │                     │                     │
+        ▼                     ▼                     ▼
+   📁 Worktree 1         📁 Worktree 2         📁 Worktree 3
+   (Isolated)            (Isolated)            (Isolated)
+        │                     │                     │
+        └─────────────────────┴─────────────────────┘
+                              │
+                    ┌─────────▼─────────┐
+                    │  🔀 Post-Completion │
+                    │  Merge + PR Create  │
+                    └─────────┬─────────┘
+                              │
+                    ✨ Integration Branch → PR
 ```
+
+**Agents are transitory**: Created automatically per work item, visible during execution, cleaned up after completion.
 
 ## ✨ Features
 
@@ -108,7 +120,7 @@ Think of it as your **personal AI development team in a box**, complete with:
 Each agent works in its own **isolated git worktree**, enabling genuine simultaneous development without conflicts.
 
 ### 🧠 Intelligent Conflict Resolution
-A dedicated monitor agent watches all branches, detects merge conflicts, and resolves them intelligently using Claude's reasoning.
+A dedicated **Resolver Agent** is spawned on-demand when merge conflicts occur during the post-completion phase, using Claude to intelligently merge code.
 
 ### 🔄 Automatic Orchestration
 Define features in YAML, run one command, and watch multiple agents implement them in parallel—complete with commits and merges.
@@ -192,11 +204,11 @@ open http://localhost:3000  # macOS
 
 **What you'll see:**
 - 🎯 **Interactive Tutorial** - Guides you through all features
-- 👥 **Teams Page** - Create AI development teams
-- 📋 **Work Queue** - Assign tasks from DevOps/Jira or create manually
-- 📊 **Real-time Dashboard** - Monitor your AI agents working
+- 👥 **Teams Page** - Create teams linked to your git repos
+- 📋 **Work Queue** - Add tasks from DevOps/Jira or create manually
+- 📊 **Real-time Dashboard** - Monitor agents as they work (live telemetry)
 
-**That's it!** Your AI development team is ready to code.
+**That's it!** Queue your work items, click Start, and watch agents spin up automatically—one per task.
 
 ## 🎬 Example: Building an Express API
 
@@ -273,31 +285,41 @@ Worktrees created at:
 ### The Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    🎼 ORCHESTRATOR                          │
-│  ┌───────────────────────────────────────────────────┐     │
-│  │          CrewAI Parallel Process                   │     │
-│  └───────────────────────────────────────────────────┘     │
-│         │                  │                  │             │
-│    ┌────▼────┐       ┌────▼────┐       ┌────▼────┐        │
-│    │ Agent 1 │       │ Agent 2 │       │ Monitor │        │
-│    │  🤖     │       │  🤖     │       │   👁️    │        │
-│    └────┬────┘       └────┬────┘       └────┬────┘        │
-└─────────┼─────────────────┼─────────────────┼─────────────┘
-          │                 │                  │
-     ┌────▼────┐       ┌───▼─────┐       ┌───▼─────┐
-     │Worktree │       │Worktree │       │  Main   │
-     │   1     │       │   2     │       │  Repo   │
-     │ 📁      │       │ 📁      │       │  📚     │
-     └────┬────┘       └───┬─────┘       └───┬─────┘
-          │                 │                  │
-          └─────────────────┴──────────────────┘
-                            │
-                      ┌─────▼─────┐
-                      │ Shared    │
-                      │ .git DB   │
-                      │  🗄️       │
-                      └───────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                        🎼 ORCHESTRATOR                            │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │     CrewAI Parallel Process (async_execution=True)          │  │
+│  │         1 Agent per Work Item - All run simultaneously      │  │
+│  └────────────────────────────────────────────────────────────┘  │
+│              │                    │                    │          │
+│         ┌────▼────┐          ┌────▼────┐          ┌────▼────┐    │
+│         │ Agent 1 │          │ Agent 2 │          │ Agent N │    │
+│         │  🤖     │          │  🤖     │          │  🤖     │    │
+│         └────┬────┘          └────┬────┘          └────┬────┘    │
+└──────────────┼────────────────────┼────────────────────┼─────────┘
+               │                    │                    │
+          ┌────▼────┐          ┌────▼────┐          ┌────▼────┐
+          │Worktree │          │Worktree │          │Worktree │
+          │   1     │          │   2     │          │   N     │
+          │ 📁      │          │ 📁      │          │ 📁      │
+          └────┬────┘          └────┬────┘          └────┬────┘
+               │                    │                    │
+               └────────────────────┴────────────────────┘
+                                    │
+                          ┌─────────▼─────────┐
+                          │   POST-COMPLETION  │
+                          │ ┌───────────────┐ │
+                          │ │ Push branches │ │
+                          │ │ Merge → integration │
+                          │ │ Resolve conflicts │◄── 🔧 Resolver Agent
+                          │ │ Create PR     │ │     (spawned if needed)
+                          │ └───────────────┘ │
+                          └─────────┬─────────┘
+                                    │
+                          ┌─────────▼─────────┐
+                          │   Shared .git DB   │
+                          │        🗄️          │
+                          └───────────────────┘
 ```
 
 ### The Secret Sauce: Git Worktrees
@@ -343,13 +365,13 @@ my-project/
 ### Key Concepts
 
 <details>
-<summary><b>🎯 Agents</b></summary>
+<summary><b>🎯 Agents (Transitory)</b></summary>
 
-**Feature Agents**: Autonomous developers that implement specific features in isolated worktrees.
+**Feature Agents**: Created dynamically by the orchestrator—**1 agent per work item**. Each works in an isolated worktree and is automatically cleaned up after the run completes.
 
-**Monitor Agent**: Oversees all branches, detects conflicts, and manages intelligent merging.
+**Resolver Agent**: Spawned on-demand during post-completion merge if conflicts are detected. Uses Claude to intelligently resolve merge conflicts.
 
-Each agent is powered by Claude Sonnet 4.5 and has access to git tools.
+All agents are powered by Claude Sonnet 4.5 and have access to git tools. Agents are **not manually configured**—they're created automatically based on your work queue.
 </details>
 
 <details>
@@ -378,17 +400,21 @@ See [`tasks/example_tasks.yaml`](claude-multi-agent-orchestrator/tasks/example_t
 </details>
 
 <details>
-<summary><b>👁️ Monitoring & Conflict Resolution</b></summary>
+<summary><b>🔀 Post-Completion & Conflict Resolution</b></summary>
 
-The monitor agent:
-1. Checks all branches every N seconds
-2. Tests for merge conflicts
-3. Reads conflicting files from both branches
-4. Uses Claude to analyze compatibility
-5. Auto-resolves or flags for review
-6. Merges when ready
+After all feature agents complete their work, the orchestrator runs a **post-completion phase**:
 
-Configurable via `check_interval` in `config.yaml`.
+1. **Push all branches** to remote
+2. **Create integration branch** from main
+3. **Merge each feature branch** sequentially into integration
+4. **If conflicts occur** → Spawn Resolver Agent to auto-resolve
+5. **Create Pull Request** from integration branch to main using `gh` CLI
+
+The Resolver Agent uses specialized tools:
+- `Read Conflict` - Parse conflict markers
+- `Resolve Conflict` - Write merged code
+- `List Conflicts` - Show unresolved files
+- `Complete Merge` - Finalize merge commit
 </details>
 
 ## 🎨 Advanced Usage
@@ -525,7 +551,9 @@ git push origin feature/amazing-feature
 ## 🌈 Roadmap
 
 - [ ] **Multi-model support** - GPT-4, Gemini alongside Claude
-- [ ] **Web UI** - Visual dashboard for monitoring agents
+- [x] **Web UI** - Visual dashboard for monitoring agents ✅
+- [x] **Work Queue Integration** - Azure DevOps, Jira, GitHub, Linear ✅
+- [x] **Automatic PR Creation** - Post-completion merge with `gh` CLI ✅
 - [ ] **Task templates** - Pre-built task libraries
 - [ ] **Conflict ML** - Learn conflict patterns over time
 - [ ] **Team mode** - Human + AI hybrid development

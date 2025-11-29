@@ -10,7 +10,6 @@ import {
   stopTeam,
   pauseTeam,
   deleteTeam,
-  addAgentToTeam,
   createWorkItem,
   type TeamWithWorkQueue,
   type TeamReadiness,
@@ -28,8 +27,6 @@ export default function TeamDetailPage() {
   const [readiness, setReadiness] = useState<TeamReadiness | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
-  const [showAddAgent, setShowAddAgent] = useState(false);
-  const [newAgent, setNewAgent] = useState({ name: "", persona_type: "dev", role: "", goal: "" });
   const [agentTelemetry, setAgentTelemetry] = useState<Record<string, AgentTelemetry>>({});
   const [showAddWorkItem, setShowAddWorkItem] = useState(false);
   const [expandedWorkItem, setExpandedWorkItem] = useState<string | null>(null);
@@ -108,18 +105,6 @@ export default function TeamDetailPage() {
       console.error(`Failed to ${action} team:`, error);
     }
     setActionLoading(false);
-  };
-
-  const handleAddAgent = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      await addAgentToTeam(teamId, newAgent);
-      setNewAgent({ name: "", persona_type: "dev", role: "", goal: "" });
-      setShowAddAgent(false);
-      await loadTeam();
-    } catch (error) {
-      console.error("Failed to add agent:", error);
-    }
   };
 
   const handleAddWorkItem = async (e: React.FormEvent) => {
@@ -280,12 +265,12 @@ export default function TeamDetailPage() {
                   <ul className="space-y-2">
                     <li className="flex items-center gap-2">
                       <span className="text-lg">
-                        {readiness.agents_count > 0 ? '✅' : '❌'}
+                        {readiness.checks.is_git_repository ? '✅' : '❌'}
                       </span>
                       <span>
-                        {readiness.agents_count > 0 
-                          ? `${readiness.agents_count} Dev agent(s) configured` 
-                          : 'Add at least one Dev agent'}
+                        {readiness.checks.is_git_repository
+                          ? 'Valid git repository'
+                          : 'Repository must be a valid git repository'}
                       </span>
                     </li>
                     <li className="flex items-center gap-2">
@@ -293,8 +278,8 @@ export default function TeamDetailPage() {
                         {readiness.queued_work_count > 0 ? '✅' : '❌'}
                       </span>
                       <span>
-                        {readiness.queued_work_count > 0 
-                          ? `${readiness.queued_work_count} work item(s) queued` 
+                        {readiness.queued_work_count > 0
+                          ? `${readiness.queued_work_count} work item(s) queued`
                           : 'Add at least one work item to the queue'}
                       </span>
                     </li>
@@ -362,125 +347,11 @@ export default function TeamDetailPage() {
           </div>
         )}
 
-        <div className="grid md:grid-cols-2 gap-6">
-          {/* Agents */}
+        <div className="grid gap-6">
+          {/* Work Queue */}
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
-                Agents ({team.agents.length})
-              </h2>
-              <button
-                onClick={() => setShowAddAgent(!showAddAgent)}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm font-medium"
-              >
-                + Add Agent
-              </button>
-            </div>
-
-            {showAddAgent && (
-              <form onSubmit={handleAddAgent} className="mb-4 p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
-                <div className="space-y-3">
-                  <input
-                    type="text"
-                    placeholder="Agent name"
-                    required
-                    value={newAgent.name}
-                    onChange={(e) =>
-                      setNewAgent({ ...newAgent, name: e.target.value })
-                    }
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
-                  />
-                  <select
-                    required
-                    value={newAgent.persona_type}
-                    onChange={(e) =>
-                      setNewAgent({ ...newAgent, persona_type: e.target.value })
-                    }
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
-                  >
-                    <option value="dev">Developer</option>
-                    <option value="monitor">Monitor</option>
-                    <option value="orchestrator">Orchestrator</option>
-                  </select>
-                  <input
-                    type="text"
-                    placeholder="Role"
-                    required
-                    value={newAgent.role}
-                    onChange={(e) =>
-                      setNewAgent({ ...newAgent, role: e.target.value })
-                    }
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
-                  />
-                  <input
-                    type="text"
-                    placeholder="Goal (optional)"
-                    value={newAgent.goal}
-                    onChange={(e) =>
-                      setNewAgent({ ...newAgent, goal: e.target.value })
-                    }
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
-                  />
-                  <div className="flex gap-2">
-                    <button
-                      type="submit"
-                      className="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-sm font-medium"
-                    >
-                      Add
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowAddAgent(false)}
-                      className="flex-1 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 px-3 py-2 rounded-lg text-sm font-medium"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              </form>
-            )}
-
-            {team.agents.length === 0 ? (
-              <p className="text-gray-500 text-center py-8">No agents yet</p>
-            ) : (
-              <div className="space-y-3">
-                {team.agents.map((agent) => (
-                  <div
-                    key={agent.id}
-                    className="border rounded p-4 hover:bg-gray-50"
-                  >
-                    <div className="flex justify-between items-start mb-2">
-                      <div>
-                        <h3 className="font-semibold">{agent.name}</h3>
-                        <p className="text-sm text-gray-600">{agent.role}</p>
-                      </div>
-                      <span
-                        className={`px-2 py-1 rounded text-xs font-medium ${getStatusColor(
-                          agent.status
-                        )}`}
-                      >
-                        {agent.status}
-                      </span>
-                    </div>
-                    {agent.goal && (
-                      <p className="text-sm text-gray-500 mb-2">{agent.goal}</p>
-                    )}
-                    {agent.current_branch && (
-                      <p className="text-xs text-gray-400">
-                        🌿 {agent.current_branch}
-                      </p>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Work Queue */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-xl font-semibold mb-4">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-semibold">
                 Work Queue ({team.work_items.length})
               </h2>
               <button
@@ -490,7 +361,6 @@ export default function TeamDetailPage() {
                 + Add Work Item
               </button>
             </div>
-            </h2>
 
             {showAddWorkItem && (
               <form onSubmit={handleAddWorkItem} className="mb-4 p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">

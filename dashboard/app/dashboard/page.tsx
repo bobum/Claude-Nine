@@ -2,24 +2,21 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { getTeams, getWorkItems, getAgents, type Team, type WorkItem, type Agent } from "@/lib/api";
+import { getTeams, getWorkItems, type Team, type WorkItem } from "@/lib/api";
 
 export default function DashboardPage() {
   const [teams, setTeams] = useState<Team[]>([]);
   const [workItems, setWorkItems] = useState<WorkItem[]>([]);
-  const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
 
   const loadData = async () => {
     try {
-      const [teamsData, workItemsData, agentsData] = await Promise.all([
+      const [teamsData, workItemsData] = await Promise.all([
         getTeams(),
         getWorkItems(),
-        getAgents(),
       ]);
       setTeams(teamsData);
       setWorkItems(workItemsData);
-      setAgents(agentsData);
       setLoading(false);
     } catch (error) {
       console.error("Failed to load dashboard data:", error);
@@ -35,7 +32,6 @@ export default function DashboardPage() {
   }, []);
 
   const activeTeams = teams.filter((t) => t.status === "active").length;
-  const workingAgents = agents.filter((a) => a.status === "working").length;
   const inProgressItems = workItems.filter((w) => w.status === "in_progress").length;
   const completedToday = workItems.filter(
     (w) =>
@@ -79,7 +75,7 @@ export default function DashboardPage() {
         </div>
 
         {/* Metrics */}
-        <div className="grid md:grid-cols-4 gap-6 mb-8">
+        <div className="grid md:grid-cols-3 gap-6 mb-8">
           <div className="bg-white rounded-lg shadow p-6">
             <div className="flex items-center justify-between mb-2">
               <span className="text-gray-500 text-sm">Active Teams</span>
@@ -87,16 +83,6 @@ export default function DashboardPage() {
             </div>
             <p className="text-3xl font-bold text-gray-900">
               {activeTeams}/{teams.length}
-            </p>
-          </div>
-
-          <div className="bg-white rounded-lg shadow p-6">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-gray-500 text-sm">Working Agents</span>
-              <div className="text-2xl">🤖</div>
-            </div>
-            <p className="text-3xl font-bold text-gray-900">
-              {workingAgents}/{agents.length}
             </p>
           </div>
 
@@ -128,7 +114,6 @@ export default function DashboardPage() {
                 {teams
                   .filter((t) => t.status === "active")
                   .map((team) => {
-                    const teamAgents = agents.filter((a) => a.team_id === team.id);
                     const teamWorkItems = workItems.filter((w) => w.team_id === team.id && w.status === "in_progress");
                     return (
                       <Link
@@ -139,7 +124,6 @@ export default function DashboardPage() {
                         <h3 className="font-semibold text-gray-900">{team.name}</h3>
                         <p className="text-sm text-gray-600">{team.product}</p>
                         <div className="flex gap-4 mt-2 text-xs text-gray-500">
-                          <span>{teamAgents.length} agents</span>
                           <span>{teamWorkItems.length} active items</span>
                         </div>
                       </Link>
@@ -176,54 +160,6 @@ export default function DashboardPage() {
                   ))}
               </div>
             )}
-          </div>
-        </div>
-
-        {/* All Agents Status */}
-        <div className="bg-white rounded-lg shadow p-6 mt-6">
-          <h2 className="text-xl font-semibold mb-4">
-            All Agents ({agents.length})
-          </h2>
-          <div className="grid md:grid-cols-3 lg:grid-cols-4 gap-4">
-            {agents.map((agent) => {
-              const team = teams.find((t) => t.id === agent.team_id);
-              const statusColors = {
-                working: "border-blue-500 bg-blue-50",
-                idle: "border-gray-300 bg-gray-50",
-                blocked: "border-red-500 bg-red-50",
-                error: "border-red-500 bg-red-50",
-              };
-              return (
-                <div
-                  key={agent.id}
-                  className={`border-2 rounded-lg p-4 ${
-                    statusColors[agent.status] || statusColors.idle
-                  }`}
-                >
-                  <div className="flex justify-between items-start mb-2">
-                    <h3 className="font-semibold text-sm">{agent.name}</h3>
-                    <span
-                      className={`w-2 h-2 rounded-full ${
-                        agent.status === "working"
-                          ? "bg-blue-500"
-                          : agent.status === "blocked" || agent.status === "error"
-                          ? "bg-red-500"
-                          : "bg-gray-400"
-                      }`}
-                    />
-                  </div>
-                  <p className="text-xs text-gray-600 mb-1">{agent.role}</p>
-                  {team && (
-                    <p className="text-xs text-gray-500">Team: {team.name}</p>
-                  )}
-                  {agent.current_branch && (
-                    <p className="text-xs text-gray-400 mt-1">
-                      🌿 {agent.current_branch}
-                    </p>
-                  )}
-                </div>
-              );
-            })}
           </div>
         </div>
       </main>
