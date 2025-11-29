@@ -320,6 +320,59 @@ Work independently and don't worry about other developers - you have your own wo
 
         return pushed_branches
 
+    def merge_all_branches(self) -> Dict[str, Any]:
+        """
+        Merge all feature branches into a single integration branch.
+
+        This is the post-completion merge phase. Creates an integration branch
+        from main and merges each feature branch sequentially.
+
+        Returns:
+            Dict with merge result:
+                - success: bool
+                - integration_branch: str
+                - merged_branches: List[str]
+                - failed_branch: str or None
+                - conflicting_files: List[str]
+        """
+        logger.info("="*80)
+        logger.info("Post-completion: Merging all feature branches into integration branch")
+        logger.info("="*80)
+
+        if not self.feature_branches:
+            logger.warning("No feature branches to merge")
+            return {
+                "success": True,
+                "integration_branch": None,
+                "merged_branches": [],
+                "failed_branch": None,
+                "conflicting_files": []
+            }
+
+        main_branch = self.config.get('main_branch', 'main')
+
+        result = self.git_ops.merge_branches_into_integration(
+            feature_branches=self.feature_branches,
+            main_branch=main_branch
+        )
+
+        if result["success"]:
+            logger.info(f"Successfully merged all branches into {result['integration_branch']}")
+            logger.info(f"Merged branches: {result['merged_branches']}")
+
+            # Push the integration branch to remote
+            try:
+                self.git_ops.push_branch(result["integration_branch"])
+                logger.info(f"Pushed integration branch: {result['integration_branch']}")
+            except Exception as e:
+                logger.error(f"Failed to push integration branch: {e}")
+        else:
+            logger.error(f"Merge failed at branch: {result['failed_branch']}")
+            logger.error(f"Conflicting files: {result['conflicting_files']}")
+            logger.info("Resolver agent will be needed to resolve conflicts")
+
+        return result
+
     def cleanup(self):
         """Clean up all worktrees on shutdown."""
         # Stop telemetry collector
@@ -426,12 +479,21 @@ Work independently and don't worry about other developers - you have your own wo
             logger.info("All feature tasks completed")
             logger.info("="*80)
 
-            # Post-completion: Push all branches to remote
+            # Post-completion Phase 1: Push all branches to remote
             pushed_branches = self.push_all_branches()
+
+            # Post-completion Phase 2: Merge all branches into integration branch
+            merge_result = self.merge_all_branches()
 
             logger.info("="*80)
             logger.info("Orchestrator completed successfully")
             logger.info(f"Pushed {len(pushed_branches)} branches: {pushed_branches}")
+            if merge_result["success"]:
+                logger.info(f"Integration branch: {merge_result['integration_branch']}")
+                logger.info(f"All {len(merge_result['merged_branches'])} branches merged successfully")
+            else:
+                logger.warning(f"Merge failed at: {merge_result['failed_branch']}")
+                logger.warning(f"Conflicts in: {merge_result['conflicting_files']}")
             logger.info("="*80)
             logger.info(f"Result: {result}")
 
