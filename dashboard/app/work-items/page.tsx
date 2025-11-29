@@ -448,6 +448,57 @@ export default function WorkItemsPage() {
                       {item.description && (
                         <p className="text-gray-600 mb-3">{item.description}</p>
                       )}
+
+                      {/* Completion Results */}
+                      {(item.status === "completed" || item.status === "pr_ready") && (item.branch_name || item.pr_url) && (
+                        <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4 mb-3">
+                          <h4 className="text-sm font-semibold text-green-800 dark:text-green-200 mb-2">
+                            Completion Results
+                          </h4>
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                            {item.branch_name && (
+                              <div>
+                                <span className="text-gray-500 dark:text-gray-400">Branch:</span>
+                                <div className="font-mono text-green-700 dark:text-green-300 truncate">
+                                  {item.branch_name}
+                                </div>
+                              </div>
+                            )}
+                            {item.commits_count !== null && (
+                              <div>
+                                <span className="text-gray-500 dark:text-gray-400">Commits:</span>
+                                <div className="font-semibold text-green-700 dark:text-green-300">
+                                  {item.commits_count}
+                                </div>
+                              </div>
+                            )}
+                            {item.files_changed_count !== null && (
+                              <div>
+                                <span className="text-gray-500 dark:text-gray-400">Files Changed:</span>
+                                <div className="font-semibold text-green-700 dark:text-green-300">
+                                  {item.files_changed_count}
+                                </div>
+                              </div>
+                            )}
+                            {item.pr_url && (
+                              <div>
+                                <span className="text-gray-500 dark:text-gray-400">Pull Request:</span>
+                                <div>
+                                  <a
+                                    href={item.pr_url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 underline"
+                                  >
+                                    View PR
+                                  </a>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
                       <div className="flex gap-6 text-sm text-gray-500">
                         {item.priority !== null && <span>Priority: {item.priority}</span>}
                         {item.story_points && <span>Points: {item.story_points}</span>}

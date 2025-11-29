@@ -113,6 +113,11 @@ class WorkItemUpdate(BaseModel):
     team_id: Optional[UUID4] = None
     status: Optional[WorkItemStatus] = None
     priority: Optional[int] = None
+    # Completion results
+    branch_name: Optional[str] = None
+    commits_count: Optional[int] = None
+    files_changed_count: Optional[int] = None
+    pr_url: Optional[str] = None
 
 
 class BulkAssignRequest(BaseModel):
@@ -129,6 +134,11 @@ class WorkItem(WorkItemBase):
     completed_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
+    # Completion results
+    branch_name: Optional[str] = None
+    commits_count: Optional[int] = None
+    files_changed_count: Optional[int] = None
+    pr_url: Optional[str] = None
 
     class Config:
         from_attributes = True

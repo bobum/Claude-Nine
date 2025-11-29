@@ -43,6 +43,11 @@ export interface WorkItem {
   completed_at: string | null;
   created_at: string;
   updated_at: string;
+  // Completion results
+  branch_name: string | null;
+  commits_count: number | null;
+  files_changed_count: number | null;
+  pr_url: string | null;
 }
 
 export interface TeamWithAgents extends Team {
