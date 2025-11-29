@@ -299,6 +299,209 @@ Work independently and don't worry about other developers - you have your own wo
         logger.info(f"Created task for feature: {feature_config['name']} on branch {branch_name}")
         return task
 
+    def create_resolver_agent(self) -> Agent:
+        """
+        Create a resolver agent for handling merge conflicts.
+
+        The resolver agent understands code and can intelligently resolve
+        merge conflicts by analyzing both versions and producing a merged result.
+
+        Returns:
+            Agent: Configured resolver agent
+        """
+        from crewai_tools import tool
+
+        # Create tools for the resolver agent
+        @tool("Read Conflict")
+        def read_conflict(file_path: str) -> str:
+            """
+            Read a file with merge conflict markers.
+            Returns the full content including conflict markers, plus parsed ours/theirs sections.
+            """
+            try:
+                conflict_info = self.git_ops.get_conflict_content(file_path)
+                return f"""File: {file_path}
+
+=== FULL CONTENT WITH CONFLICT MARKERS ===
+{conflict_info['full_content']}
+
+=== OUR VERSION (current branch) ===
+{conflict_info['ours']}
+
+=== THEIR VERSION (incoming branch) ===
+{conflict_info['theirs']}
+"""
+            except Exception as e:
+                return f"Error reading conflict: {e}"
+
+        @tool("Resolve Conflict")
+        def resolve_conflict(file_path: str, resolved_content: str) -> str:
+            """
+            Write the resolved content to a conflicting file and stage it.
+            The resolved_content should be the final merged version WITHOUT conflict markers.
+            """
+            try:
+                self.git_ops.resolve_conflict(file_path, resolved_content)
+                return f"Successfully resolved and staged: {file_path}"
+            except Exception as e:
+                return f"Error resolving conflict: {e}"
+
+        @tool("List Conflicts")
+        def list_conflicts() -> str:
+            """List all files with unresolved merge conflicts."""
+            try:
+                status = self.git_ops.repo.git.status('--porcelain')
+                conflicts = []
+                for line in status.split('\n'):
+                    if line.startswith('UU ') or line.startswith('AA '):
+                        conflicts.append(line[3:].strip())
+                if conflicts:
+                    return "Conflicting files:\n" + "\n".join(f"  - {f}" for f in conflicts)
+                else:
+                    return "No conflicts remaining"
+            except Exception as e:
+                return f"Error listing conflicts: {e}"
+
+        @tool("Complete Merge")
+        def complete_merge(commit_message: str) -> str:
+            """
+            Complete the merge after all conflicts are resolved.
+            Call this only after all conflicts have been resolved.
+            """
+            try:
+                success = self.git_ops.complete_merge(commit_message)
+                if success:
+                    return f"Merge completed successfully with message: {commit_message}"
+                else:
+                    return "Failed to complete merge - there may be unresolved conflicts"
+            except Exception as e:
+                return f"Error completing merge: {e}"
+
+        backstory = """You are an expert code merge resolver. Your job is to resolve merge conflicts
+intelligently by understanding both versions of the code and producing a clean merged result.
+
+When resolving conflicts:
+1. First use 'List Conflicts' to see all conflicting files
+2. For each file, use 'Read Conflict' to see both versions
+3. Analyze the changes - understand what each version is trying to do
+4. Create a merged version that incorporates both changes correctly
+5. Use 'Resolve Conflict' to write the resolved content
+6. After all files are resolved, use 'Complete Merge' to finish
+
+Guidelines for resolution:
+- If both sides add different code, include both (in logical order)
+- If both sides modify the same code differently, combine the intent of both
+- If one side deletes and another modifies, prefer the modification unless it's clearly obsolete
+- Preserve code style and formatting
+- Ensure the result is syntactically valid code
+"""
+
+        llm = LLM(
+            model="anthropic/claude-sonnet-4-5-20250929",
+            api_key=os.getenv("ANTHROPIC_API_KEY"),
+            max_tokens=8192  # Larger for code resolution
+        )
+
+        agent = Agent(
+            role="Merge Conflict Resolver",
+            goal="Resolve all merge conflicts intelligently to produce clean, working code",
+            backstory=backstory,
+            tools=[read_conflict, resolve_conflict, list_conflicts, complete_merge],
+            llm=llm,
+            verbose=True,
+            allow_delegation=False
+        )
+
+        logger.info("Created resolver agent for conflict resolution")
+        return agent
+
+    def resolve_conflicts(
+        self,
+        failed_branch: str,
+        conflicting_files: List[str],
+        integration_branch: str
+    ) -> bool:
+        """
+        Use the resolver agent to resolve merge conflicts.
+
+        Args:
+            failed_branch: The branch that caused the conflict
+            conflicting_files: List of files with conflicts
+            integration_branch: The integration branch being merged into
+
+        Returns:
+            bool: True if conflicts were resolved successfully
+        """
+        logger.info("="*80)
+        logger.info(f"Resolver Agent: Attempting to resolve conflicts from {failed_branch}")
+        logger.info(f"Conflicting files: {conflicting_files}")
+        logger.info("="*80)
+
+        try:
+            # First, restart the merge (it was aborted earlier)
+            self.git_ops.repo.heads[integration_branch].checkout()
+            merge_result = self.git_ops.start_merge_with_conflicts(failed_branch)
+
+            if not merge_result["has_conflicts"]:
+                # No conflicts this time - just complete the merge
+                self.git_ops.complete_merge(f"Merge {failed_branch} into {integration_branch}")
+                logger.info(f"Merge of {failed_branch} completed without conflicts on retry")
+                return True
+
+            # Create resolver agent and task
+            resolver = self.create_resolver_agent()
+
+            task_description = f"""Resolve the merge conflicts from merging '{failed_branch}' into '{integration_branch}'.
+
+Conflicting files:
+{chr(10).join(f'  - {f}' for f in merge_result['conflicting_files'])}
+
+Steps:
+1. Use 'List Conflicts' to confirm the conflicting files
+2. For each conflicting file:
+   a. Use 'Read Conflict' to see both versions
+   b. Analyze what each version is trying to do
+   c. Create a merged version that makes sense
+   d. Use 'Resolve Conflict' to write your resolution
+3. After resolving all files, use 'Complete Merge' with message:
+   "Merge {failed_branch} into {integration_branch} (conflicts resolved)"
+
+Be careful to produce valid, working code in your resolutions.
+"""
+
+            task = Task(
+                description=task_description,
+                agent=resolver,
+                expected_output="All conflicts resolved and merge completed"
+            )
+
+            # Run the resolver
+            crew = Crew(
+                agents=[resolver],
+                tasks=[task],
+                process=Process.sequential,
+                verbose=True
+            )
+
+            result = crew.kickoff()
+            logger.info(f"Resolver completed: {result}")
+
+            # Verify merge was completed
+            try:
+                # Check if we're still in a merge state
+                self.git_ops.repo.git.status()
+                logger.info("Conflicts resolved successfully")
+                return True
+            except Exception:
+                logger.error("Merge may not have completed properly")
+                return False
+
+        except Exception as e:
+            logger.error(f"Resolver failed: {e}", exc_info=True)
+            # Abort any in-progress merge
+            self.git_ops.abort_merge()
+            return False
+
     def push_all_branches(self) -> List[str]:
         """
         Push all feature branches to remote after tasks complete.
@@ -357,6 +560,49 @@ Work independently and don't worry about other developers - you have your own wo
             main_branch=main_branch
         )
 
+        # If merge failed due to conflicts, try to resolve them
+        if not result["success"] and result["failed_branch"]:
+            logger.info("Attempting automatic conflict resolution...")
+
+            resolved = self.resolve_conflicts(
+                failed_branch=result["failed_branch"],
+                conflicting_files=result["conflicting_files"],
+                integration_branch=result["integration_branch"]
+            )
+
+            if resolved:
+                # Add the resolved branch to merged list
+                result["merged_branches"].append(result["failed_branch"])
+
+                # Continue merging remaining branches
+                remaining_branches = [
+                    b for b in self.feature_branches
+                    if b not in result["merged_branches"]
+                ]
+
+                if remaining_branches:
+                    logger.info(f"Continuing with remaining branches: {remaining_branches}")
+                    for branch in remaining_branches:
+                        merge_result = self.git_ops.start_merge_with_conflicts(branch)
+                        if merge_result["has_conflicts"]:
+                            # Try to resolve this one too
+                            if self.resolve_conflicts(branch, merge_result["conflicting_files"], result["integration_branch"]):
+                                result["merged_branches"].append(branch)
+                            else:
+                                result["failed_branch"] = branch
+                                result["conflicting_files"] = merge_result["conflicting_files"]
+                                break
+                        else:
+                            self.git_ops.complete_merge(f"Merge {branch} into {result['integration_branch']}")
+                            result["merged_branches"].append(branch)
+
+                # Check if all branches were merged
+                if set(result["merged_branches"]) == set(self.feature_branches):
+                    result["success"] = True
+                    result["failed_branch"] = None
+                    result["conflicting_files"] = []
+                    logger.info("All conflicts resolved successfully!")
+
         if result["success"]:
             logger.info(f"Successfully merged all branches into {result['integration_branch']}")
             logger.info(f"Merged branches: {result['merged_branches']}")
@@ -370,7 +616,7 @@ Work independently and don't worry about other developers - you have your own wo
         else:
             logger.error(f"Merge failed at branch: {result['failed_branch']}")
             logger.error(f"Conflicting files: {result['conflicting_files']}")
-            logger.info("Resolver agent will be needed to resolve conflicts")
+            logger.error("Could not automatically resolve all conflicts")
 
         return result
 

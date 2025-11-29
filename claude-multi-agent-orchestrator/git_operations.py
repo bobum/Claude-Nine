@@ -755,6 +755,157 @@ class GitOperations:
             result["failed_branch"] = "unknown"
             return result
 
+    def start_merge_with_conflicts(
+        self,
+        branch_name: str,
+        allow_conflicts: bool = True
+    ) -> Dict[str, any]:
+        """
+        Start a merge that may have conflicts, without aborting.
+
+        Unlike regular merge, this leaves conflicting files with conflict markers
+        for manual or automated resolution.
+
+        Args:
+            branch_name: Branch to merge into current branch
+            allow_conflicts: If True, don't abort on conflicts
+
+        Returns:
+            Dict with keys:
+                - success: bool - True if merge completed without conflicts
+                - has_conflicts: bool - True if there are unresolved conflicts
+                - conflicting_files: List[str] - Files with conflicts
+        """
+        result = {
+            "success": False,
+            "has_conflicts": False,
+            "conflicting_files": []
+        }
+
+        try:
+            logger.info(f"Starting merge of {branch_name} (allow_conflicts={allow_conflicts})")
+            self.repo.git.merge(branch_name, no_commit=True)
+            result["success"] = True
+            logger.info(f"Merge of {branch_name} completed without conflicts")
+
+        except GitCommandError as e:
+            if "conflict" in str(e).lower() or "CONFLICT" in str(e):
+                logger.warning(f"Merge has conflicts: {e}")
+                result["has_conflicts"] = True
+
+                # Get list of conflicting files
+                try:
+                    status_output = self.repo.git.status('--porcelain')
+                    for line in status_output.split('\n'):
+                        if line.startswith('UU ') or line.startswith('AA ') or line.startswith('DU ') or line.startswith('UD '):
+                            result["conflicting_files"].append(line[3:].strip())
+                except Exception:
+                    pass
+
+                if not allow_conflicts:
+                    logger.info("Aborting merge due to conflicts")
+                    self.repo.git.merge('--abort')
+            else:
+                raise
+
+        return result
+
+    def get_conflict_content(self, file_path: str) -> Dict[str, str]:
+        """
+        Get the conflicting content from a file with conflict markers.
+
+        Args:
+            file_path: Path to the conflicted file
+
+        Returns:
+            Dict with keys:
+                - full_content: str - The file with conflict markers
+                - ours: str - Our version (current branch)
+                - theirs: str - Their version (merging branch)
+                - base: str - Common ancestor (if available)
+        """
+        full_path = os.path.join(self.repo_path, file_path)
+
+        with open(full_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        result = {
+            "full_content": content,
+            "ours": "",
+            "theirs": "",
+            "base": ""
+        }
+
+        # Parse conflict markers
+        # Format: <<<<<<< HEAD ... ||||||| base ... ======= ... >>>>>>> branch
+        import re
+
+        # Simple two-way conflict
+        two_way = re.findall(
+            r'<<<<<<<[^\n]*\n(.*?)\n=======\n(.*?)\n>>>>>>>[^\n]*',
+            content,
+            re.DOTALL
+        )
+
+        if two_way:
+            result["ours"] = "\n---\n".join([m[0] for m in two_way])
+            result["theirs"] = "\n---\n".join([m[1] for m in two_way])
+
+        return result
+
+    def resolve_conflict(self, file_path: str, resolved_content: str) -> None:
+        """
+        Resolve a conflict by writing the resolved content and staging the file.
+
+        Args:
+            file_path: Path to the conflicted file
+            resolved_content: The resolved content to write
+        """
+        full_path = os.path.join(self.repo_path, file_path)
+
+        # Write resolved content
+        with open(full_path, 'w', encoding='utf-8') as f:
+            f.write(resolved_content)
+
+        # Stage the file
+        self.repo.index.add([file_path])
+        logger.info(f"Resolved and staged: {file_path}")
+
+    def complete_merge(self, message: str) -> bool:
+        """
+        Complete a merge after all conflicts are resolved.
+
+        Args:
+            message: Commit message for the merge
+
+        Returns:
+            bool: True if merge was completed successfully
+        """
+        try:
+            # Check if there are still unmerged files
+            status = self.repo.git.status('--porcelain')
+            for line in status.split('\n'):
+                if line.startswith('UU ') or line.startswith('AA '):
+                    logger.error(f"Cannot complete merge - unresolved conflicts remain")
+                    return False
+
+            # Commit the merge
+            self.repo.index.commit(message)
+            logger.info(f"Merge completed with message: {message}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to complete merge: {e}")
+            return False
+
+    def abort_merge(self) -> None:
+        """Abort the current merge in progress."""
+        try:
+            self.repo.git.merge('--abort')
+            logger.info("Merge aborted")
+        except Exception as e:
+            logger.warning(f"Could not abort merge: {e}")
+
     def delete_branch(self, branch_name: str, force: bool = False) -> None:
         """
         Delete a local branch.
