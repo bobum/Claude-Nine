@@ -292,7 +292,7 @@ Work independently and don't worry about other developers - you have your own wo
             description=task_description,
             agent=agent,
             expected_output=expected_output,
-            async_execution=False  # Sequential execution for feature tasks
+            async_execution=True  # Parallel execution - all tasks run concurrently
         )
 
         logger.info(f"Created task for feature: {feature_config['name']} on branch {branch_name}")
@@ -379,7 +379,7 @@ Work independently and don't worry about other developers - you have your own wo
 
             logger.info(f"Created {len(feature_agents)} feature agents (each with isolated worktree)")
             logger.info(f"Worktrees created at: {[str(p) for p in worktree_paths]}")
-            logger.info(f"Starting crew with {len(feature_tasks)} tasks")
+            logger.info(f"Starting crew with {len(feature_tasks)} tasks (parallel execution)")
 
             # Initialize telemetry if team_id provided
             if self.team_id:
@@ -409,11 +409,12 @@ Work independently and don't worry about other developers - you have your own wo
                     logger.warning(f"Failed to start telemetry: {e}")
 
 
-            # Create and run crew
+            # Create and run crew with parallel execution
+            # All tasks run concurrently - each agent works on its task simultaneously
             crew = Crew(
                 agents=feature_agents,
                 tasks=feature_tasks,
-                process=Process.sequential,  # Tasks run sequentially for now
+                process=Process.sequential,  # Sequential process, but tasks marked async run in parallel
                 verbose=True
             )
 
