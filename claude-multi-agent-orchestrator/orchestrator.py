@@ -3,10 +3,12 @@
 Multi-Agent Orchestrator for CrewAI with Claude.
 
 This orchestrator manages multiple Claude agents working simultaneously
-on different features in a monorepo, with intelligent merge conflict resolution.
+on different features in a monorepo.
 
 Uses git worktrees to give each agent an isolated working directory,
 enabling true parallel development without interference.
+
+Post-completion merge phase handles branch merging after all tasks complete.
 """
 
 import os
@@ -49,9 +51,7 @@ class MultiAgentOrchestrator:
     Features:
     - Parallel feature development on separate branches using git worktrees
     - Each agent gets its own isolated working directory
-    - Continuous conflict monitoring
-    - Intelligent merge conflict resolution
-    - Automatic merge when ready
+    - Post-completion merge phase for combining branches
     - Automatic cleanup of worktrees on shutdown
     """
 
@@ -68,7 +68,7 @@ class MultiAgentOrchestrator:
         self.tasks_config = self._load_tasks(tasks_path)
         self.repo_path = os.getcwd()
 
-        # Main git operations (for monitor and coordination)
+        # Main git operations (for coordination)
         self.git_ops = GitOperations(self.repo_path)
 
         # Workspace directory for worktrees and logs
@@ -82,6 +82,8 @@ class MultiAgentOrchestrator:
 
         # Track worktrees for cleanup
         self.worktrees: List[str] = []
+        # Track branches created for post-completion merge
+        self.feature_branches: List[str] = []
         self.running = True
 
         # Telemetry
@@ -186,6 +188,9 @@ class MultiAgentOrchestrator:
         agent_goal = feature_config.get('goal', f"Implement {agent_name}")
         branch_name = feature_config.get('branch', f"feature/{agent_name}")
 
+        # Track branch for post-completion merge
+        self.feature_branches.append(branch_name)
+
         # Create isolated worktree for this agent
         worktree_path = self.workspace_dir / f"worktree-{agent_name}"
 
@@ -213,8 +218,7 @@ Your workflow:
 1. You already have your own branch checked out in your workspace
 2. Implement the feature step by step in your isolated directory
 3. Make small, atomic commits for each logical change
-4. Push your branch regularly so the monitor can track progress
-5. Write clean, well-documented code
+4. Write clean, well-documented code
 
 IMPORTANT: You are working in an isolated worktree directory. All file operations
 happen in your own workspace: {worktree_abs_path}
@@ -247,72 +251,6 @@ Always make commits with descriptive messages. Work independently and focus on y
             # Don't crash - return None to skip this agent
             return None, None
 
-    def create_monitor_agent(self) -> Agent:
-        """
-        Create the monitor agent for conflict resolution.
-
-        The monitor agent works in the main repository directory
-        to oversee all branches.
-
-        Returns:
-            Agent: Configured monitor agent
-        """
-        monitor_role = "Merge Conflict Monitor and Resolver"
-        monitor_goal = """Monitor all feature branches for potential merge conflicts and resolve them intelligently.
-Ensure all features can be merged into main without conflicts."""
-
-        # Monitor uses main repo tools (not a worktree)
-        monitor_tools = create_git_tools(self.repo_path)
-
-        backstory = f"""You are an expert at managing parallel development and resolving merge conflicts.
-You work in the main repository at {self.repo_path}.
-
-Your responsibilities:
-
-1. Continuously monitor all feature branches (they're being developed in separate worktrees)
-2. Check for commits that could cause merge conflicts
-3. When conflicts are detected:
-   - Read both versions of the conflicting files
-   - Understand the intent of each change
-   - Determine if changes are compatible or need refactoring
-   - Either auto-resolve compatible changes or flag for developer review
-4. Merge branches that are ready and conflict-free
-5. Maintain the integrity of the main branch
-
-You have deep knowledge of code architecture and can make intelligent decisions
-about conflict resolution. You prioritize:
-- Code correctness over convenience
-- Clear communication about conflicts
-- Safe, atomic merges
-
-Use your git tools to check conflicts, read files from different branches,
-and perform merges when appropriate.
-
-NOTE: Feature agents are working in isolated worktrees, but you see all their
-branches in the shared repository. You don't need to worry about their working
-directories - just monitor and merge their branches.
-"""
-
-        # Create LLM with explicit API key
-        llm = LLM(
-            model="anthropic/claude-sonnet-4-5-20250929",
-            api_key=os.getenv("ANTHROPIC_API_KEY"),
-            max_tokens=4096
-        )
-
-        agent = Agent(
-            role=monitor_role,
-            goal=monitor_goal,
-            backstory=backstory,
-            tools=monitor_tools,
-            llm=llm,
-            verbose=True,
-            allow_delegation=False
-        )
-
-        logger.info("Created monitor agent for conflict resolution")
-        return agent
-
     def create_feature_task(self, agent: Agent, feature_config: Dict[str, Any], worktree_path: str) -> Task:
         """
         Create a task for a feature agent.
@@ -341,8 +279,7 @@ Workflow:
 1. You are already on branch '{branch_name}' in your isolated workspace
 2. Implement the feature following the requirements
 3. Make incremental commits as you complete each part
-4. Push your branch after each commit so the monitor can see your progress
-5. Ensure code is well-documented and tested
+4. Ensure code is well-documented and tested
 
 Your worktree: {worktree_path}
 Your branch: {branch_name}
@@ -361,61 +298,27 @@ Work independently and don't worry about other developers - you have your own wo
         logger.info(f"Created task for feature: {feature_config['name']} on branch {branch_name}")
         return task
 
-    def create_monitor_task(self, agent: Agent) -> Task:
+    def push_all_branches(self) -> List[str]:
         """
-        Create the monitoring task for conflict detection and resolution.
-
-        Args:
-            agent: The monitor agent
+        Push all feature branches to remote after tasks complete.
 
         Returns:
-            Task: Configured monitoring task
+            List[str]: List of successfully pushed branches
         """
-        check_interval = self.config.get('check_interval', 60)
-        main_branch = self.config.get('main_branch', 'main')
+        logger.info("="*80)
+        logger.info("Post-completion: Pushing all feature branches to remote")
+        logger.info("="*80)
 
-        task_description = f"""
-Continuously monitor all feature branches for merge conflicts and resolve them.
+        pushed_branches = []
+        for branch_name in self.feature_branches:
+            try:
+                self.git_ops.push_branch(branch_name)
+                pushed_branches.append(branch_name)
+                logger.info(f"Successfully pushed branch: {branch_name}")
+            except Exception as e:
+                logger.error(f"Failed to push branch {branch_name}: {e}")
 
-Your monitoring workflow:
-
-1. Every {check_interval} seconds, check all branches
-2. For each feature branch (they're being developed in separate worktrees):
-   - Check if it has new commits
-   - Test for merge conflicts with {main_branch}
-   - If conflicts found:
-     a. Read conflicting files from both branches
-     b. Analyze the changes and their intent
-     c. Determine if changes are compatible
-     d. If compatible: document resolution strategy
-     e. If incompatible: flag for manual review with detailed explanation
-3. For branches without conflicts:
-   - Verify the feature appears complete (has commits with implementation)
-   - Merge into {main_branch} when ready
-   - Log the successful merge
-
-Use your tools to:
-- Get all branches
-- Check for conflicts
-- Read files from different branches
-- Merge when appropriate
-
-Continue monitoring until all features are merged or you receive a stop signal.
-Report status regularly.
-
-NOTE: Feature developers are working in isolated worktrees. You're monitoring
-their branches in the shared repository. Focus on branch management and merging.
-"""
-
-        task = Task(
-            description=task_description,
-            agent=agent,
-            expected_output="All features monitored and conflicts resolved",
-            async_execution=False  # Monitor runs after feature tasks complete
-        )
-
-        logger.info("Created monitoring task")
-        return task
+        return pushed_branches
 
     def cleanup(self):
         """Clean up all worktrees on shutdown."""
@@ -471,25 +374,18 @@ their branches in the shared repository. Focus on branch management and merging.
                 feature_tasks.append(task)
                 worktree_paths.append(worktree_path)
 
-            # Create monitor agent and task
-            monitor_agent = self.create_monitor_agent()
-            monitor_task = self.create_monitor_task(monitor_agent)
-
-            # Combine all agents and tasks
-            all_agents = feature_agents + [monitor_agent]
-            all_tasks = feature_tasks + [monitor_task]
+            # Note: Monitor agent removed - merge will happen in post-completion phase
+            # All agents work on their tasks, then we push and merge branches after completion
 
             logger.info(f"Created {len(feature_agents)} feature agents (each with isolated worktree)")
-            logger.info(f"Created 1 monitor agent (working in main repo)")
             logger.info(f"Worktrees created at: {[str(p) for p in worktree_paths]}")
-            logger.info(f"Starting crew with {len(all_tasks)} tasks in parallel")
+            logger.info(f"Starting crew with {len(feature_tasks)} tasks")
 
             # Initialize telemetry if team_id provided
             if self.team_id:
                 try:
                     # Extract agent names from feature configs
                     agent_names = [fc.get("name", f"Agent-{idx}") for idx, fc in enumerate(self.tasks_config)]
-                    agent_names.append("Monitor")  # Add monitor agent
 
                     # Initialize telemetry collector using global function
                     api_url = os.getenv("CLAUDE_NINE_API_URL", "http://localhost:8000")
@@ -500,7 +396,7 @@ their branches in the shared repository. Focus on branch management and merging.
                         check_interval=2
                     )
                     logger.info(f"Started telemetry collection for team {self.team_id}")
-                    
+
                     # Add initial activity logs for each agent
                     for agent_name in agent_names:
                         collector.add_activity_log(
@@ -515,9 +411,9 @@ their branches in the shared repository. Focus on branch management and merging.
 
             # Create and run crew
             crew = Crew(
-                agents=all_agents,
-                tasks=all_tasks,
-                process=Process.sequential,  # Tasks marked async_execution=True will run in parallel
+                agents=feature_agents,
+                tasks=feature_tasks,
+                process=Process.sequential,  # Tasks run sequentially for now
                 verbose=True
             )
 
@@ -526,7 +422,15 @@ their branches in the shared repository. Focus on branch management and merging.
             result = crew.kickoff()
 
             logger.info("="*80)
+            logger.info("All feature tasks completed")
+            logger.info("="*80)
+
+            # Post-completion: Push all branches to remote
+            pushed_branches = self.push_all_branches()
+
+            logger.info("="*80)
             logger.info("Orchestrator completed successfully")
+            logger.info(f"Pushed {len(pushed_branches)} branches: {pushed_branches}")
             logger.info("="*80)
             logger.info(f"Result: {result}")
 
@@ -625,8 +529,7 @@ def main():
     # Create and run orchestrator
     orchestrator = MultiAgentOrchestrator(
         config_path=args.config,
-        tasks_path=args.tasks
-    ,
+        tasks_path=args.tasks,
         team_id=args.team_id
     )
     orchestrator.setup_signal_handlers()
