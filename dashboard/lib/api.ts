@@ -82,14 +82,12 @@ export interface TeamReadiness {
   team_id: string;
   is_ready: boolean;
   checks: {
-    has_agents: boolean;
     has_repository: boolean;
     repository_exists: boolean;
     is_git_repository: boolean;
     has_queued_work: boolean;
   };
   issues: string[];
-  agents_count: number;
   queued_work_count: number;
   queued_work_items: Array<{
     id: string;
@@ -167,35 +165,6 @@ export async function deleteTeam(id: string): Promise<void> {
     method: "DELETE",
   });
   if (!response.ok) throw new Error("Failed to delete team");
-}
-
-// Agents
-export async function getAgents(teamId?: string): Promise<Agent[]> {
-  const url = teamId
-    ? `${API_BASE_URL}/api/agents/?team_id=${teamId}`
-    : `${API_BASE_URL}/api/agents/`;
-  const response = await fetch(url);
-  if (!response.ok) throw new Error("Failed to fetch agents");
-  return response.json();
-}
-
-export async function addAgentToTeam(
-  teamId: string,
-  data: {
-    name: string;
-    persona_type: string;
-    specialization?: string;
-    role: string;
-    goal?: string;
-  }
-): Promise<Agent> {
-  const response = await fetch(`${API_BASE_URL}/api/teams/${teamId}/agents`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  });
-  if (!response.ok) throw new Error("Failed to add agent");
-  return response.json();
 }
 
 // Work Items

@@ -4,15 +4,13 @@ from typing import List
 from uuid import UUID
 
 from ..database import get_db
-from ..models import Team, Agent
+from ..models import Team
 from ..schemas import (
     Team as TeamSchema,
     TeamCreate,
     TeamUpdate,
     TeamWithAgents,
     TeamWithWorkQueue,
-    AgentCreate,
-    Agent as AgentSchema
 )
 
 router = APIRouter()
@@ -106,7 +104,6 @@ def get_team_readiness(
 
     # Check all prerequisites
     checks = {
-        "has_agents": bool(db_team.agents),
         "has_repository": bool(db_team.repo_path),
         "repository_exists": False,
         "is_git_repository": False,
@@ -114,10 +111,6 @@ def get_team_readiness(
     }
 
     issues = []
-
-    # Check agents
-    if not checks["has_agents"]:
-        issues.append("No agents assigned to team")
 
     # Check repository
     if checks["has_repository"]:
@@ -151,7 +144,6 @@ def get_team_readiness(
         "is_ready": is_ready,
         "checks": checks,
         "issues": issues,
-        "agents_count": len(db_team.agents) if db_team.agents else 0,
         "queued_work_count": len(queued_items),
         "queued_work_items": [
             {
@@ -195,13 +187,6 @@ async def start_team(
     if not db_team:
         raise HTTPException(status_code=404, detail="Team not found")
 
-    # Validate prerequisites
-    if not db_team.agents:
-        raise HTTPException(
-            status_code=400,
-            detail="Cannot start team: No agents assigned to team"
-        )
-
     # Check for queued work items
     from ..models import WorkItem
     queued_items = db.query(WorkItem).filter(
@@ -242,7 +227,6 @@ async def start_team(
     return {
         "message": "Team started successfully",
         "team_id": str(team_id),
-        "agents_count": len(db_team.agents),
         "queued_work_count": len(queued_items),
         "orchestrator_status": result.get("status", "unknown"),
         "status": "active"
@@ -304,52 +288,3 @@ def pause_team(
     # TODO: Actually pause the orchestrator for this team
 
     return {"message": "Team paused", "team_id": str(team_id)}
-
-
-@router.post("/{team_id}/agents", response_model=AgentSchema, status_code=status.HTTP_201_CREATED)
-def add_agent_to_team(
-    team_id: UUID,
-    agent: AgentCreate,
-    db: Session = Depends(get_db)
-):
-    """Add an agent to a team"""
-    from ..personas import get_persona, validate_persona_for_team
-
-    # Verify team exists
-    db_team = db.query(Team).filter(Team.id == team_id).first()
-    if not db_team:
-        raise HTTPException(status_code=404, detail="Team not found")
-
-    # Validate persona type and team limits
-    is_valid, error_msg = validate_persona_for_team(agent.persona_type, db_team.agents)
-    if not is_valid:
-        raise HTTPException(status_code=400, detail=error_msg)
-
-    # Check if agent name already exists in team
-    existing = db.query(Agent).filter(
-        Agent.team_id == team_id,
-        Agent.name == agent.name
-    ).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="Agent name already exists in this team")
-
-    # Get persona template and auto-fill role/goal if not provided
-    persona = get_persona(agent.persona_type)
-    if persona:
-        agent_dict = agent.dict(exclude={'team_id'})
-
-        # Use persona template if role not customized
-        if not agent_dict.get('role') or agent_dict['role'] == persona.role_template:
-            agent_dict['role'] = persona.get_role(agent_dict.get('specialization'))
-
-        # Use persona template if goal not customized
-        if not agent_dict.get('goal') or agent_dict['goal'] == persona.goal_template:
-            agent_dict['goal'] = persona.get_goal()
-    else:
-        agent_dict = agent.dict(exclude={'team_id'})
-
-    db_agent = Agent(team_id=team_id, **agent_dict)
-    db.add(db_agent)
-    db.commit()
-    db.refresh(db_agent)
-    return db_agent
