@@ -643,3 +643,289 @@ class GitOperations:
             bool: True if branch exists, False otherwise
         """
         return branch_name in self.repo.heads
+
+    def merge_branches_into_integration(
+        self,
+        feature_branches: List[str],
+        main_branch: str = "main",
+        integration_branch: str = None
+    ) -> Dict[str, any]:
+        """
+        Merge multiple feature branches into a single integration branch.
+
+        Creates an integration branch from main, then merges each feature branch
+        sequentially. If any merge fails due to conflicts, stops and returns
+        conflict info for the resolver agent.
+
+        Args:
+            feature_branches: List of feature branch names to merge
+            main_branch: Base branch to create integration from (default: "main")
+            integration_branch: Name for integration branch (auto-generated if None)
+
+        Returns:
+            Dict with keys:
+                - success: bool - True if all merges succeeded
+                - integration_branch: str - Name of the integration branch
+                - merged_branches: List[str] - Branches that were successfully merged
+                - failed_branch: str or None - Branch that caused conflict
+                - conflicting_files: List[str] - Files with conflicts (if any)
+        """
+        result = {
+            "success": False,
+            "integration_branch": None,
+            "merged_branches": [],
+            "failed_branch": None,
+            "conflicting_files": []
+        }
+
+        try:
+            # Generate integration branch name if not provided
+            if not integration_branch:
+                timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+                integration_branch = f"integration/{timestamp}"
+
+            result["integration_branch"] = integration_branch
+
+            # Checkout main branch first
+            logger.info(f"Checking out {main_branch} to create integration branch")
+            self.repo.heads[main_branch].checkout()
+
+            # Pull latest main
+            try:
+                origin = self.repo.remote(name='origin')
+                origin.pull(main_branch)
+            except Exception as e:
+                logger.warning(f"Could not pull from origin: {e}")
+
+            # Create integration branch from main
+            if integration_branch in self.repo.heads:
+                logger.warning(f"Integration branch {integration_branch} already exists, deleting it")
+                self.repo.delete_head(integration_branch, force=True)
+
+            logger.info(f"Creating integration branch: {integration_branch}")
+            new_branch = self.repo.create_head(integration_branch)
+            new_branch.checkout()
+
+            # Merge each feature branch sequentially
+            for branch in feature_branches:
+                if not self.branch_exists(branch):
+                    logger.warning(f"Branch {branch} does not exist, skipping")
+                    continue
+
+                try:
+                    logger.info(f"Merging {branch} into {integration_branch}")
+                    self.repo.git.merge(branch, m=f"Merge {branch} into {integration_branch}")
+                    result["merged_branches"].append(branch)
+                    logger.info(f"Successfully merged {branch}")
+
+                except GitCommandError as e:
+                    if "conflict" in str(e).lower() or "CONFLICT" in str(e):
+                        logger.error(f"Merge conflict while merging {branch}: {e}")
+                        result["failed_branch"] = branch
+
+                        # Get conflicting files
+                        try:
+                            status_output = self.repo.git.status('--porcelain')
+                            conflicting = []
+                            for line in status_output.split('\n'):
+                                if line.startswith('UU ') or line.startswith('AA '):
+                                    conflicting.append(line[3:])
+                            result["conflicting_files"] = conflicting
+                        except Exception:
+                            pass
+
+                        # Abort the merge
+                        try:
+                            self.repo.git.merge('--abort')
+                        except Exception:
+                            pass
+
+                        logger.error(f"Merge failed at branch {branch}, aborting")
+                        return result
+                    else:
+                        raise e
+
+            # All merges succeeded
+            result["success"] = True
+            logger.info(f"Successfully merged all {len(result['merged_branches'])} branches into {integration_branch}")
+            return result
+
+        except Exception as e:
+            logger.error(f"Unexpected error during integration merge: {e}")
+            result["failed_branch"] = "unknown"
+            return result
+
+    def start_merge_with_conflicts(
+        self,
+        branch_name: str,
+        allow_conflicts: bool = True
+    ) -> Dict[str, any]:
+        """
+        Start a merge that may have conflicts, without aborting.
+
+        Unlike regular merge, this leaves conflicting files with conflict markers
+        for manual or automated resolution.
+
+        Args:
+            branch_name: Branch to merge into current branch
+            allow_conflicts: If True, don't abort on conflicts
+
+        Returns:
+            Dict with keys:
+                - success: bool - True if merge completed without conflicts
+                - has_conflicts: bool - True if there are unresolved conflicts
+                - conflicting_files: List[str] - Files with conflicts
+        """
+        result = {
+            "success": False,
+            "has_conflicts": False,
+            "conflicting_files": []
+        }
+
+        try:
+            logger.info(f"Starting merge of {branch_name} (allow_conflicts={allow_conflicts})")
+            self.repo.git.merge(branch_name, no_commit=True)
+            result["success"] = True
+            logger.info(f"Merge of {branch_name} completed without conflicts")
+
+        except GitCommandError as e:
+            if "conflict" in str(e).lower() or "CONFLICT" in str(e):
+                logger.warning(f"Merge has conflicts: {e}")
+                result["has_conflicts"] = True
+
+                # Get list of conflicting files
+                try:
+                    status_output = self.repo.git.status('--porcelain')
+                    for line in status_output.split('\n'):
+                        if line.startswith('UU ') or line.startswith('AA ') or line.startswith('DU ') or line.startswith('UD '):
+                            result["conflicting_files"].append(line[3:].strip())
+                except Exception:
+                    pass
+
+                if not allow_conflicts:
+                    logger.info("Aborting merge due to conflicts")
+                    self.repo.git.merge('--abort')
+            else:
+                raise
+
+        return result
+
+    def get_conflict_content(self, file_path: str) -> Dict[str, str]:
+        """
+        Get the conflicting content from a file with conflict markers.
+
+        Args:
+            file_path: Path to the conflicted file
+
+        Returns:
+            Dict with keys:
+                - full_content: str - The file with conflict markers
+                - ours: str - Our version (current branch)
+                - theirs: str - Their version (merging branch)
+                - base: str - Common ancestor (if available)
+        """
+        full_path = os.path.join(self.repo_path, file_path)
+
+        with open(full_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        result = {
+            "full_content": content,
+            "ours": "",
+            "theirs": "",
+            "base": ""
+        }
+
+        # Parse conflict markers
+        # Format: <<<<<<< HEAD ... ||||||| base ... ======= ... >>>>>>> branch
+        import re
+
+        # Simple two-way conflict
+        two_way = re.findall(
+            r'<<<<<<<[^\n]*\n(.*?)\n=======\n(.*?)\n>>>>>>>[^\n]*',
+            content,
+            re.DOTALL
+        )
+
+        if two_way:
+            result["ours"] = "\n---\n".join([m[0] for m in two_way])
+            result["theirs"] = "\n---\n".join([m[1] for m in two_way])
+
+        return result
+
+    def resolve_conflict(self, file_path: str, resolved_content: str) -> None:
+        """
+        Resolve a conflict by writing the resolved content and staging the file.
+
+        Args:
+            file_path: Path to the conflicted file
+            resolved_content: The resolved content to write
+        """
+        full_path = os.path.join(self.repo_path, file_path)
+
+        # Write resolved content
+        with open(full_path, 'w', encoding='utf-8') as f:
+            f.write(resolved_content)
+
+        # Stage the file
+        self.repo.index.add([file_path])
+        logger.info(f"Resolved and staged: {file_path}")
+
+    def complete_merge(self, message: str) -> bool:
+        """
+        Complete a merge after all conflicts are resolved.
+
+        Args:
+            message: Commit message for the merge
+
+        Returns:
+            bool: True if merge was completed successfully
+        """
+        try:
+            # Check if there are still unmerged files
+            status = self.repo.git.status('--porcelain')
+            for line in status.split('\n'):
+                if line.startswith('UU ') or line.startswith('AA '):
+                    logger.error(f"Cannot complete merge - unresolved conflicts remain")
+                    return False
+
+            # Commit the merge
+            self.repo.index.commit(message)
+            logger.info(f"Merge completed with message: {message}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to complete merge: {e}")
+            return False
+
+    def abort_merge(self) -> None:
+        """Abort the current merge in progress."""
+        try:
+            self.repo.git.merge('--abort')
+            logger.info("Merge aborted")
+        except Exception as e:
+            logger.warning(f"Could not abort merge: {e}")
+
+    def delete_branch(self, branch_name: str, force: bool = False) -> None:
+        """
+        Delete a local branch.
+
+        Args:
+            branch_name: Branch name to delete
+            force: Force delete even if not fully merged
+
+        Raises:
+            RuntimeError: If deletion fails
+        """
+        try:
+            if not self.branch_exists(branch_name):
+                logger.warning(f"Branch {branch_name} does not exist")
+                return
+
+            logger.info(f"Deleting branch {branch_name}")
+            self.repo.delete_head(branch_name, force=force)
+            logger.info(f"Successfully deleted branch {branch_name}")
+
+        except GitCommandError as e:
+            logger.error(f"Failed to delete branch {branch_name}: {e}")
+            raise RuntimeError(f"Failed to delete branch {branch_name}: {e}")

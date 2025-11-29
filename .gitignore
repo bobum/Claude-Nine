@@ -24,10 +24,14 @@ activate.sh
 *.db
 *.db-journal
 
-# Test files
-test_*.py
-test_*.yaml
+# Test files (root level only, allow test suites in subdirectories)
+/test_*.py
+/test_*.yaml
 *.bak
+
+# Allow test files in test directories
+!api/tests/test_*.py
+!claude-multi-agent-orchestrator/tests/test_*.py
 
 # Claude Code workspace
 .claude/

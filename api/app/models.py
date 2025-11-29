@@ -117,6 +117,12 @@ class WorkItem(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
+    # Completion results
+    branch_name = Column(String(255))
+    commits_count = Column(Integer)
+    files_changed_count = Column(Integer)
+    pr_url = Column(String(500))
+
     # Relationships
     team = relationship("Team", back_populates="work_items")
     activity_logs = relationship("ActivityLog", back_populates="work_item")
