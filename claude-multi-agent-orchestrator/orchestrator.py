@@ -293,8 +293,7 @@ Work independently and don't worry about other developers - you have your own wo
             description=task_description,
             agent=agent,
             expected_output=expected_output
-            # Note: async_execution removed - CrewAI now only allows one async task (the last one)
-            # Tasks will run sequentially within the crew
+            # Note: We use separate Crews per task with kickoff_async() for true parallel execution
         )
 
         logger.info(f"Created task for feature: {feature_config['name']} on branch {branch_name}")
@@ -790,18 +789,55 @@ Be careful to produce valid, working code in your resolutions.
                     logger.warning(f"Failed to start telemetry: {e}")
 
 
-            # Create and run crew with parallel execution
-            # All tasks run concurrently - each agent works on its task simultaneously
-            crew = Crew(
-                agents=feature_agents,
-                tasks=feature_tasks,
-                process=Process.sequential,  # Sequential process, but tasks marked async run in parallel
-                verbose=True
-            )
+            # Create and run multiple crews in parallel (one per agent/task)
+            # This is the recommended pattern for true parallel execution in CrewAI
+            logger.info("Creating individual crews for parallel execution...")
 
-            # Run the crew
-            logger.info("Starting crew execution...")
-            result = crew.kickoff()
+            crews = []
+            for agent, task in zip(feature_agents, feature_tasks):
+                crew = Crew(
+                    agents=[agent],
+                    tasks=[task],
+                    process=Process.sequential,
+                    verbose=True
+                )
+                crews.append(crew)
+
+            logger.info(f"Created {len(crews)} crews for parallel execution")
+
+            # Run all crews in parallel using asyncio
+            import asyncio
+
+            async def run_crews_parallel(crews_list):
+                """Run all crews in parallel and collect results."""
+                tasks = [crew.kickoff_async() for crew in crews_list]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                return results
+
+            # Execute all crews in parallel
+            logger.info("Starting parallel crew execution...")
+            try:
+                # Get or create event loop
+                try:
+                    loop = asyncio.get_running_loop()
+                    # If we're already in an async context, use run_coroutine_threadsafe
+                    import concurrent.futures
+                    future = asyncio.run_coroutine_threadsafe(run_crews_parallel(crews), loop)
+                    results = future.result()
+                except RuntimeError:
+                    # No running loop, create one
+                    results = asyncio.run(run_crews_parallel(crews))
+
+                # Check for any exceptions in results
+                for idx, result in enumerate(results):
+                    if isinstance(result, Exception):
+                        logger.error(f"Crew {idx} failed with error: {result}")
+                    else:
+                        logger.info(f"Crew {idx} completed successfully")
+
+            except Exception as e:
+                logger.error(f"Error during parallel crew execution: {e}")
+                raise
 
             logger.info("="*80)
             logger.info("All feature tasks completed")
