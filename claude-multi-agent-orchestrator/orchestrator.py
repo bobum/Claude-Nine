@@ -94,17 +94,22 @@ class MultiAgentOrchestrator:
         if headless_mode:
             logger.info("Running in headless mode - telemetry will be written to files")
 
-        # Set up API key
-        if 'anthropic_api_key' in self.config and self.config['anthropic_api_key']:
-            os.environ['ANTHROPIC_API_KEY'] = self.config['anthropic_api_key']
-            logger.info(f"Set ANTHROPIC_API_KEY from config: {self.config['anthropic_api_key'][:20]}...")
+        # Set up API key - environment variable takes precedence over config
+        env_api_key = os.getenv('ANTHROPIC_API_KEY')
+        config_api_key = self.config.get('anthropic_api_key', '')
+
+        if env_api_key and env_api_key.startswith('sk-'):
+            # Environment variable is set with a valid-looking key
+            logger.info(f"Using ANTHROPIC_API_KEY from environment: {env_api_key[:20]}...")
+        elif config_api_key and config_api_key.startswith('sk-'):
+            # Use config value as fallback (only if it looks like a real key)
+            os.environ['ANTHROPIC_API_KEY'] = config_api_key
+            logger.info(f"Set ANTHROPIC_API_KEY from config: {config_api_key[:20]}...")
+        elif env_api_key:
+            # Env var exists but doesn't look like a key
+            logger.warning(f"ANTHROPIC_API_KEY in env doesn't look valid: {env_api_key[:20]}...")
         else:
-            logger.warning(f"No API key in config. Config keys: {list(self.config.keys())}")
-            # Check if it's in environment already
-            if os.getenv('ANTHROPIC_API_KEY'):
-                logger.info(f"ANTHROPIC_API_KEY found in environment: {os.getenv('ANTHROPIC_API_KEY')[:20]}...")
-            else:
-                logger.error("ANTHROPIC_API_KEY not found in config or environment!")
+            logger.error("ANTHROPIC_API_KEY not found in environment or config!")
 
         # Register cleanup handler
         atexit.register(self.cleanup)
@@ -798,18 +803,54 @@ Be careful to produce valid, working code in your resolutions.
                     logger.warning(f"Failed to start telemetry: {e}")
 
 
-            # Create and run crew with parallel execution
-            # All tasks run concurrently - each agent works on its task simultaneously
-            crew = Crew(
-                agents=feature_agents,
-                tasks=feature_tasks,
-                process=Process.sequential,  # Sequential process, but tasks marked async run in parallel
-                verbose=True
-            )
+            # Create and run multiple crews in parallel (one per agent/task)
+            # This is the recommended pattern for true parallel execution in CrewAI
+            logger.info("Creating individual crews for parallel execution...")
 
-            # Run the crew
-            logger.info("Starting crew execution...")
-            result = crew.kickoff()
+            crews = []
+            for agent, task in zip(feature_agents, feature_tasks):
+                crew = Crew(
+                    agents=[agent],
+                    tasks=[task],
+                    process=Process.sequential,
+                    verbose=True
+                )
+                crews.append(crew)
+
+            logger.info(f"Created {len(crews)} crews for parallel execution")
+
+            # Run all crews in parallel using asyncio
+            import asyncio
+
+            async def run_crews_parallel(crews_list):
+                """Run all crews in parallel and collect results."""
+                tasks = [crew.kickoff_async() for crew in crews_list]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                return results
+
+            # Execute all crews in parallel
+            logger.info("Starting parallel crew execution...")
+            try:
+                # Get or create event loop
+                try:
+                    loop = asyncio.get_running_loop()
+                    import concurrent.futures
+                    future = asyncio.run_coroutine_threadsafe(run_crews_parallel(crews), loop)
+                    results = future.result()
+                except RuntimeError:
+                    # No running loop, create one
+                    results = asyncio.run(run_crews_parallel(crews))
+
+                # Check for any exceptions in results
+                for idx, result in enumerate(results):
+                    if isinstance(result, Exception):
+                        logger.error(f"Crew {idx} failed with error: {result}")
+                    else:
+                        logger.info(f"Crew {idx} completed successfully")
+
+            except Exception as e:
+                logger.error(f"Error during parallel crew execution: {e}")
+                raise
 
             logger.info("="*80)
             logger.info("All feature tasks completed")

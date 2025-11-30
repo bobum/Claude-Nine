@@ -1,20 +1,70 @@
-# Auto-generated tasks from database
+# 4-Task parallel test configuration for schematics repo
 
 features:
   - name: TASK-001
     role: Frontend Developer
-    goal: Create beautiful and interactive visual representations
+    goal: Enhance the visual presentation of connections
     branch: feature/task-001
     description: |
-      Create visual representation of connections in HTML
-      Replace the simple list-based (<li>) representation of connections with a more visual and interactive display. Create a new branch for this work and commit all changes.
+      Create visual representation of connections in HTML.
+      Replace the simple list-based (<li>) representation of connections with a more visual and interactive display.
 
       Acceptance Criteria:
-      - New branch created
       - Visual connection display implemented (replacing <li> elements)
-      - Changes committed to the new branch
       - More engaging visual representation than plain list items
+      - Changes committed to the new branch
     expected_output: |
-      Complete implementation of: Create visual representation of connections in HTML
+      Complete implementation of visual connection display
       All code committed to branch feature/task-001
 
+  - name: TASK-002
+    role: CSS Developer
+    goal: Improve styling and visual aesthetics
+    branch: feature/task-002
+    description: |
+      Add modern CSS styling to the existing HTML pages.
+      Create a cohesive visual design with improved typography, colors, and spacing.
+
+      Acceptance Criteria:
+      - Modern CSS styling applied
+      - Improved typography and readability
+      - Consistent color scheme
+      - Responsive design considerations
+      - Changes committed to the new branch
+    expected_output: |
+      Complete CSS styling improvements
+      All code committed to branch feature/task-002
+
+  - name: TASK-003
+    role: JavaScript Developer
+    goal: Add interactive functionality
+    branch: feature/task-003
+    description: |
+      Add interactive JavaScript functionality to enhance user experience.
+      Implement hover effects, click handlers, or dynamic content loading.
+
+      Acceptance Criteria:
+      - Interactive JavaScript features added
+      - Event handlers implemented
+      - User feedback mechanisms (hover states, click responses)
+      - Changes committed to the new branch
+    expected_output: |
+      Complete JavaScript interactivity implementation
+      All code committed to branch feature/task-003
+
+  - name: TASK-004
+    role: Documentation Developer
+    goal: Add inline documentation and comments
+    branch: feature/task-004
+    description: |
+      Add comprehensive inline documentation to the codebase.
+      Document functions, explain complex logic, and add helpful comments.
+
+      Acceptance Criteria:
+      - JSDoc comments for JavaScript functions
+      - CSS section comments explaining styling choices
+      - HTML comments marking major sections
+      - Changes committed to the new branch
+    expected_output: |
+      Complete documentation additions
+      All code committed to branch feature/task-004
