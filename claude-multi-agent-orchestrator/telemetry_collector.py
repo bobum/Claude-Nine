@@ -12,12 +12,14 @@ It collects:
 """
 
 import os
+import json
 import psutil
 import threading
 import time
 import logging
 import re
 import httpx
+from pathlib import Path
 from typing import Dict, List, Optional, Any
 from datetime import datetime, UTC
 from dataclasses import dataclass, asdict
@@ -67,6 +69,29 @@ class ActivityLog:
     agent_name: Optional[str] = None
 
 
+@dataclass
+class AgentTelemetrySnapshot:
+    """Complete telemetry snapshot for an agent"""
+    agent_name: str
+    timestamp: str
+    status: str  # "working" | "idle" | "completed" | "error"
+    current_task: Optional[str] = None
+    current_action: Optional[str] = None  # What the agent is doing right now
+    files_read: List[str] = None
+    files_written: List[str] = None
+    tool_calls: List[Dict[str, Any]] = None
+    token_usage: Optional[TokenUsage] = None
+    process_metrics: Optional[ProcessMetrics] = None
+
+    def __post_init__(self):
+        if self.files_read is None:
+            self.files_read = []
+        if self.files_written is None:
+            self.files_written = []
+        if self.tool_calls is None:
+            self.tool_calls = []
+
+
 class TelemetryCollector:
     """
     Background telemetry collector for orchestrator subprocess.
@@ -76,6 +101,9 @@ class TelemetryCollector:
     - Agent activity (from CrewAI logs)
     - Token usage per agent
     - Git operations per agent
+    - Tool calls and file operations
+
+    Supports both API reporting and file-based output for headless mode.
     """
 
     def __init__(
@@ -83,7 +111,9 @@ class TelemetryCollector:
         team_id: str,
         agent_names: List[str],
         api_url: str = "http://localhost:8000",
-        check_interval: int = 2
+        check_interval: int = 2,
+        output_dir: Optional[Path] = None,
+        headless_mode: bool = False
     ):
         """
         Initialize the telemetry collector.
@@ -93,11 +123,24 @@ class TelemetryCollector:
             agent_names: List of agent names to track
             api_url: URL of Claude-Nine API
             check_interval: How often to collect and report (seconds)
+            output_dir: Directory for file-based telemetry output (headless mode)
+            headless_mode: If True, skip API reporting and write to files only
         """
         self.team_id = team_id
         self.agent_names = agent_names
         self.api_url = api_url
         self.check_interval = check_interval
+        self.headless_mode = headless_mode
+
+        # Set up output directory for file-based telemetry
+        if output_dir:
+            self.output_dir = Path(output_dir)
+        else:
+            self.output_dir = Path.cwd() / ".agent-workspace" / "telemetry"
+
+        if headless_mode or output_dir:
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+            logger.info(f"Telemetry output directory: {self.output_dir}")
 
         # Our own PID
         self.pid = os.getpid()
@@ -106,6 +149,7 @@ class TelemetryCollector:
         # Running state
         self.running = False
         self.thread: Optional[threading.Thread] = None
+        self.start_time = datetime.now(UTC)
 
         # Per-agent tracking
         self.agent_token_usage: Dict[str, TokenUsage] = {
@@ -121,6 +165,14 @@ class TelemetryCollector:
         self.agent_git_activities: Dict[str, List[GitActivity]] = defaultdict(list)
         self.agent_activity_logs: Dict[str, List[ActivityLog]] = defaultdict(list)
 
+        # Enhanced tracking for more valuable telemetry
+        self.agent_status: Dict[str, str] = {name: "idle" for name in agent_names}
+        self.agent_current_task: Dict[str, str] = {name: "" for name in agent_names}
+        self.agent_current_action: Dict[str, str] = {name: "" for name in agent_names}
+        self.agent_files_read: Dict[str, List[str]] = defaultdict(list)
+        self.agent_files_written: Dict[str, List[str]] = defaultdict(list)
+        self.agent_tool_calls: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+
         # Current agent context (for log parsing)
         self.current_agent: Optional[str] = None
 
@@ -128,8 +180,13 @@ class TelemetryCollector:
         self.log_buffer: List[str] = []
         self.max_log_buffer = 1000
 
+        # Telemetry event log (for file output)
+        self.telemetry_events: List[Dict[str, Any]] = []
+
         logger.info(f"Initialized telemetry collector for team {team_id}")
         logger.info(f"Tracking {len(agent_names)} agents: {', '.join(agent_names)}")
+        if headless_mode:
+            logger.info("Running in headless mode - telemetry will be written to files")
 
     def start(self):
         """Start the telemetry collection thread."""
@@ -143,14 +200,88 @@ class TelemetryCollector:
         logger.info("Telemetry collector started")
 
     def stop(self):
-        """Stop the telemetry collection thread."""
+        """Stop the telemetry collection thread and write final summary."""
         if not self.running:
             return
 
         self.running = False
         if self.thread:
             self.thread.join(timeout=5)
+
+        # Write final summary
+        if self.headless_mode or self.output_dir:
+            self._write_final_summary()
+
         logger.info("Telemetry collector stopped")
+
+    def _write_final_summary(self):
+        """Write a comprehensive summary of the entire run."""
+        try:
+            end_time = datetime.now(UTC)
+            duration = (end_time - self.start_time).total_seconds()
+
+            summary = {
+                "team_id": self.team_id,
+                "start_time": self.start_time.isoformat(),
+                "end_time": end_time.isoformat(),
+                "duration_seconds": round(duration, 2),
+                "agents": {}
+            }
+
+            # Compile per-agent summaries
+            total_tokens = 0
+            total_cost = 0.0
+            total_files_read = 0
+            total_files_written = 0
+            total_tool_calls = 0
+
+            for agent_name in self.agent_names:
+                token_usage = self.agent_token_usage.get(agent_name)
+                if token_usage:
+                    total_tokens += token_usage.total_tokens
+                    total_cost += token_usage.cost_usd
+
+                files_read = len(self.agent_files_read.get(agent_name, []))
+                files_written = len(self.agent_files_written.get(agent_name, []))
+                tool_calls = len(self.agent_tool_calls.get(agent_name, []))
+
+                total_files_read += files_read
+                total_files_written += files_written
+                total_tool_calls += tool_calls
+
+                summary["agents"][agent_name] = {
+                    "status": self.agent_status.get(agent_name, "unknown"),
+                    "token_usage": asdict(token_usage) if token_usage else None,
+                    "files_read": files_read,
+                    "files_read_list": self.agent_files_read.get(agent_name, []),
+                    "files_written": files_written,
+                    "files_written_list": self.agent_files_written.get(agent_name, []),
+                    "tool_calls": tool_calls,
+                    "git_activities": [
+                        asdict(a) for a in self.agent_git_activities.get(agent_name, [])
+                    ],
+                    "log_count": len(self.agent_activity_logs.get(agent_name, []))
+                }
+
+            summary["totals"] = {
+                "total_tokens": total_tokens,
+                "total_cost_usd": round(total_cost, 4),
+                "total_files_read": total_files_read,
+                "total_files_written": total_files_written,
+                "total_tool_calls": total_tool_calls,
+                "total_events": len(self.telemetry_events)
+            }
+
+            # Write summary file
+            summary_file = self.output_dir / "run_summary.json"
+            with open(summary_file, 'w', encoding='utf-8') as f:
+                json.dump(summary, f, indent=2, default=str)
+
+            logger.info(f"Wrote telemetry summary to {summary_file}")
+            logger.info(f"Run summary: {summary['totals']}")
+
+        except Exception as e:
+            logger.error(f"Failed to write final summary: {e}")
 
     def _collection_loop(self):
         """Main collection loop running in background thread."""
@@ -199,14 +330,20 @@ class TelemetryCollector:
             )
 
     def _report_agent_telemetry(self, agent_name: str, metrics: ProcessMetrics):
-        """Report telemetry data for a specific agent to the API."""
+        """Report telemetry data for a specific agent to the API and/or files."""
         try:
-            # Prepare telemetry payload
+            # Prepare telemetry payload with enhanced data
             payload = {
                 "team_id": self.team_id,
                 "agent_name": agent_name,
+                "status": self.agent_status.get(agent_name, "unknown"),
+                "current_task": self.agent_current_task.get(agent_name, ""),
+                "current_action": self.agent_current_action.get(agent_name, ""),
                 "process_metrics": asdict(metrics),
                 "token_usage": asdict(self.agent_token_usage[agent_name]),
+                "files_read": self.agent_files_read.get(agent_name, [])[-10:],
+                "files_written": self.agent_files_written.get(agent_name, [])[-10:],
+                "tool_calls": self.agent_tool_calls.get(agent_name, [])[-10:],
                 "git_activities": [
                     asdict(activity) for activity in self.agent_git_activities[agent_name][-10:]
                 ],
@@ -216,21 +353,47 @@ class TelemetryCollector:
                 "timestamp": datetime.now(UTC).isoformat()
             }
 
-            # Send to API (synchronous - we're in a thread)
-            # Note: Using httpx instead of requests for better async support later
-            with httpx.Client(timeout=5.0) as client:
-                response = client.post(
-                    f"{self.api_url}/api/telemetry/agent/{agent_name}",
-                    json=payload
-                )
+            # Store event for file output
+            self.telemetry_events.append({
+                "type": "agent_update",
+                "data": payload
+            })
 
-                if response.status_code != 200:
-                    logger.warning(
-                        f"API returned status {response.status_code} for agent {agent_name}"
+            # Write to file if in headless mode or output dir is set
+            if self.headless_mode or self.output_dir:
+                self._write_telemetry_to_file(agent_name, payload)
+
+            # Send to API if not in headless mode
+            if not self.headless_mode:
+                with httpx.Client(timeout=5.0) as client:
+                    response = client.post(
+                        f"{self.api_url}/api/telemetry/agent/{agent_name}",
+                        json=payload
                     )
+
+                    if response.status_code != 200:
+                        logger.warning(
+                            f"API returned status {response.status_code} for agent {agent_name}"
+                        )
 
         except Exception as e:
             logger.warning(f"Failed to report telemetry for {agent_name}: {e}")
+
+    def _write_telemetry_to_file(self, agent_name: str, payload: Dict[str, Any]):
+        """Write telemetry data to a file for headless mode."""
+        try:
+            # Write to agent-specific latest file
+            agent_file = self.output_dir / f"{agent_name}_latest.json"
+            with open(agent_file, 'w', encoding='utf-8') as f:
+                json.dump(payload, f, indent=2, default=str)
+
+            # Also append to the agent's event log
+            event_log_file = self.output_dir / f"{agent_name}_events.jsonl"
+            with open(event_log_file, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(payload, default=str) + "\n")
+
+        except Exception as e:
+            logger.warning(f"Failed to write telemetry file for {agent_name}: {e}")
 
     def process_log_line(self, line: str):
         """
@@ -240,6 +403,8 @@ class TelemetryCollector:
         - Which agent is currently active
         - Git operations
         - Token usage
+        - File operations (reads/writes)
+        - Tool calls
         - General activity
         """
         # Add to buffer
@@ -252,7 +417,58 @@ class TelemetryCollector:
         agent_match = re.search(agent_pattern, line, re.IGNORECASE)
         if agent_match:
             self.current_agent = agent_match.group(1).strip()
+            self.agent_status[self.current_agent] = "working"
             logger.debug(f"Switched context to agent: {self.current_agent}")
+
+        # Parse file read operations
+        file_read_patterns = [
+            r'Read\s+(.+?)\s+from\s+working\s+directory',
+            r'Reading\s+file:\s+(.+)',
+            r'git_read_file.*?path["\']?\s*[:=]\s*["\']?([^"\',\s]+)',
+        ]
+        for pattern in file_read_patterns:
+            match = re.search(pattern, line, re.IGNORECASE)
+            if match and self.current_agent:
+                file_path = match.group(1).strip()
+                self.track_file_read(self.current_agent, file_path)
+                break
+
+        # Parse file write operations
+        file_write_patterns = [
+            r'Wrote\s+content\s+to\s+(.+)',
+            r'Writing\s+file:\s+(.+)',
+            r'git_write_file.*?path["\']?\s*[:=]\s*["\']?([^"\',\s]+)',
+        ]
+        for pattern in file_write_patterns:
+            match = re.search(pattern, line, re.IGNORECASE)
+            if match and self.current_agent:
+                file_path = match.group(1).strip()
+                self.track_file_write(self.current_agent, file_path)
+                break
+
+        # Parse tool usage
+        tool_patterns = [
+            r'Using\s+tool:\s+(.+)',
+            r'Tool\s+call:\s+(.+)',
+            r'Executing\s+(.+?)\s+tool',
+        ]
+        for pattern in tool_patterns:
+            match = re.search(pattern, line, re.IGNORECASE)
+            if match and self.current_agent:
+                tool_name = match.group(1).strip()
+                self.track_tool_call(self.current_agent, tool_name)
+                break
+
+        # Parse agent completion
+        completion_patterns = [
+            r'Task\s+completed',
+            r'Agent\s+finished',
+            r'Crew\s+Execution\s+Completed',
+        ]
+        for pattern in completion_patterns:
+            if re.search(pattern, line, re.IGNORECASE) and self.current_agent:
+                self.agent_status[self.current_agent] = "completed"
+                break
 
         # Parse git activity
         git_activity = self._parse_git_activity(line)
@@ -492,6 +708,74 @@ class TelemetryCollector:
 
         logger.debug(f"Added activity log for {agent_name}: [{level}] {message[:50]}")
 
+    def track_tool_call(
+        self,
+        agent_name: str,
+        tool_name: str,
+        arguments: Optional[Dict[str, Any]] = None,
+        result: Optional[str] = None
+    ):
+        """
+        Track a tool call made by an agent.
+
+        Args:
+            agent_name: Name of the agent
+            tool_name: Name of the tool being called
+            arguments: Tool arguments (optional)
+            result: Tool result summary (optional)
+        """
+        tool_call = {
+            "timestamp": datetime.now(UTC).isoformat(),
+            "tool": tool_name,
+            "arguments": arguments or {},
+            "result": result[:200] if result else None
+        }
+
+        self.agent_tool_calls[agent_name].append(tool_call)
+
+        # Keep only last 50 per agent
+        if len(self.agent_tool_calls[agent_name]) > 50:
+            self.agent_tool_calls[agent_name].pop(0)
+
+        # Update current action
+        self.agent_current_action[agent_name] = f"Using {tool_name}"
+
+        logger.debug(f"Tracked tool call for {agent_name}: {tool_name}")
+
+    def track_file_read(self, agent_name: str, file_path: str):
+        """Track a file read operation by an agent."""
+        if file_path not in self.agent_files_read[agent_name]:
+            self.agent_files_read[agent_name].append(file_path)
+        self.agent_current_action[agent_name] = f"Reading {Path(file_path).name}"
+        logger.debug(f"Tracked file read for {agent_name}: {file_path}")
+
+    def track_file_write(self, agent_name: str, file_path: str):
+        """Track a file write operation by an agent."""
+        if file_path not in self.agent_files_written[agent_name]:
+            self.agent_files_written[agent_name].append(file_path)
+        self.agent_current_action[agent_name] = f"Writing {Path(file_path).name}"
+        logger.debug(f"Tracked file write for {agent_name}: {file_path}")
+
+    def set_agent_status(self, agent_name: str, status: str, task: Optional[str] = None):
+        """
+        Update an agent's status.
+
+        Args:
+            agent_name: Name of the agent
+            status: New status (idle, working, completed, error)
+            task: Current task description (optional)
+        """
+        self.agent_status[agent_name] = status
+        if task:
+            self.agent_current_task[agent_name] = task
+
+        logger.debug(f"Set status for {agent_name}: {status}")
+
+    def set_agent_action(self, agent_name: str, action: str):
+        """Update what an agent is currently doing."""
+        self.agent_current_action[agent_name] = action
+        logger.debug(f"Set action for {agent_name}: {action}")
+
 
 # Global telemetry collector instance
 _global_collector: Optional[TelemetryCollector] = None
@@ -501,7 +785,9 @@ def initialize_telemetry(
     team_id: str,
     agent_names: List[str],
     api_url: str = "http://localhost:8000",
-    check_interval: int = 2
+    check_interval: int = 2,
+    output_dir: Optional[Path] = None,
+    headless_mode: bool = False
 ) -> TelemetryCollector:
     """
     Initialize and start the global telemetry collector.
@@ -511,6 +797,8 @@ def initialize_telemetry(
         agent_names: List of agent names to track
         api_url: URL of Claude-Nine API
         check_interval: How often to collect and report (seconds)
+        output_dir: Directory for file-based telemetry output
+        headless_mode: If True, skip API reporting and write to files only
 
     Returns:
         TelemetryCollector: The initialized collector instance
@@ -525,11 +813,15 @@ def initialize_telemetry(
         team_id=team_id,
         agent_names=agent_names,
         api_url=api_url,
-        check_interval=check_interval
+        check_interval=check_interval,
+        output_dir=output_dir,
+        headless_mode=headless_mode
     )
     _global_collector.start()
 
     logger.info(f"Global telemetry collector initialized for team {team_id}")
+    if headless_mode:
+        logger.info(f"Telemetry will be written to: {_global_collector.output_dir}")
     return _global_collector
 
 

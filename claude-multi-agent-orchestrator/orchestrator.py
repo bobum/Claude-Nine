@@ -56,7 +56,7 @@ class MultiAgentOrchestrator:
     - Automatic cleanup of worktrees on shutdown
     """
 
-    def __init__(self, config_path: str = "config.yaml", tasks_path: str = "tasks/example_tasks.yaml", team_id: str = None):
+    def __init__(self, config_path: str = "config.yaml", tasks_path: str = "tasks/example_tasks.yaml", team_id: str = None, headless_mode: bool = False):
         """
         Initialize the orchestrator.
 
@@ -64,6 +64,7 @@ class MultiAgentOrchestrator:
             config_path: Path to configuration file
             tasks_path: Path to tasks definition file
             team_id: Team ID for API integration (optional)
+            headless_mode: If True, write telemetry to files instead of API
         """
         self.config = self._load_config(config_path)
         self.tasks_config = self._load_tasks(tasks_path)
@@ -89,6 +90,9 @@ class MultiAgentOrchestrator:
 
         # Telemetry
         self.team_id = team_id
+        self.headless_mode = headless_mode
+        if headless_mode:
+            logger.info("Running in headless mode - telemetry will be written to files")
 
         # Set up API key
         if 'anthropic_api_key' in self.config and self.config['anthropic_api_key']:
@@ -769,13 +773,18 @@ Be careful to produce valid, working code in your resolutions.
 
                     # Initialize telemetry collector using global function
                     api_url = os.getenv("CLAUDE_NINE_API_URL", "http://localhost:8000")
+                    telemetry_output_dir = self.workspace_dir / "telemetry"
                     collector = initialize_telemetry(
                         team_id=self.team_id,
                         agent_names=agent_names,
                         api_url=api_url,
-                        check_interval=2
+                        check_interval=2,
+                        output_dir=telemetry_output_dir,
+                        headless_mode=self.headless_mode
                     )
                     logger.info(f"Started telemetry collection for team {self.team_id}")
+                    if self.headless_mode:
+                        logger.info(f"Telemetry output: {telemetry_output_dir}")
 
                     # Add initial activity logs for each agent
                     for agent_name in agent_names:
@@ -897,6 +906,11 @@ def main():
         default=None,
         help='Team ID for API integration (optional)'
     )
+    parser.add_argument(
+        '--headless',
+        action='store_true',
+        help='Headless mode: write telemetry to files instead of API'
+    )
 
     args = parser.parse_args()
 
@@ -931,7 +945,8 @@ def main():
     orchestrator = MultiAgentOrchestrator(
         config_path=args.config,
         tasks_path=args.tasks,
-        team_id=args.team_id
+        team_id=args.team_id,
+        headless_mode=args.headless
     )
     orchestrator.setup_signal_handlers()
 

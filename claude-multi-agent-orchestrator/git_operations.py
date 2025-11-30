@@ -9,7 +9,7 @@ multiple agents to work in parallel on different branches without conflicts.
 import os
 import shutil
 import logging
-from typing import List, Tuple, Optional, Dict
+from typing import List, Tuple, Optional, Dict, Any
 from pathlib import Path
 from datetime import datetime
 import git
