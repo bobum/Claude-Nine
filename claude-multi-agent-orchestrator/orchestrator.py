@@ -20,6 +20,7 @@ import signal
 import atexit
 import subprocess
 import requests
+import uuid
 from typing import List, Dict, Any, Tuple, Optional
 from datetime import datetime
 from pathlib import Path
@@ -87,6 +88,11 @@ class MultiAgentOrchestrator:
         # Track branches created for post-completion merge
         self.feature_branches: List[str] = []
         self.running = True
+
+        # Session ID for unique branch naming (8-char GUID)
+        self.session_id = str(uuid.uuid4()).replace('-', '')[:8]
+        self.integration_branch = f"integration/{self.session_id}"
+        logger.info(f"Session ID: {self.session_id}")
 
         # Telemetry
         self.team_id = team_id
@@ -196,22 +202,24 @@ class MultiAgentOrchestrator:
         agent_name = feature_config.get('name', 'Feature Developer')
         agent_role = feature_config.get('role', f"{agent_name} Developer")
         agent_goal = feature_config.get('goal', f"Implement {agent_name}")
-        branch_name = feature_config.get('branch', f"feature/{agent_name}")
+        # Append session ID to branch name for uniqueness
+        base_branch = feature_config.get('branch', f"feature/{agent_name}")
+        branch_name = f"{base_branch}-{self.session_id}"
 
         # Track branch for post-completion merge
         self.feature_branches.append(branch_name)
 
-        # Create isolated worktree for this agent
-        worktree_path = self.workspace_dir / f"worktree-{agent_name}"
+        # Create isolated worktree for this agent (include session ID for uniqueness)
+        worktree_path = self.workspace_dir / f"worktree-{agent_name}-{self.session_id}"
 
         logger.info(f"Creating worktree for {agent_name} at {worktree_path}")
 
         try:
-            main_branch = self.config.get('main_branch', 'main')
+            # Feature branches are created from integration branch, not main
             worktree_abs_path = self.git_ops.create_worktree(
                 branch_name=branch_name,
                 worktree_path=str(worktree_path),
-                main_branch=main_branch
+                main_branch=self.integration_branch  # Branch from integration
             )
 
             # Track for cleanup
@@ -273,7 +281,9 @@ Always make commits with descriptive messages. Work independently and focus on y
         Returns:
             Task: Configured CrewAI task
         """
-        branch_name = feature_config.get('branch', f"feature/{feature_config['name']}")
+        # Include session ID in branch name for consistency with create_feature_agent
+        base_branch = feature_config.get('branch', f"feature/{feature_config['name']}")
+        branch_name = f"{base_branch}-{self.session_id}"
         description = feature_config.get('description', '')
         expected_output = feature_config.get('expected_output', 'Feature implemented and committed')
 
@@ -318,7 +328,7 @@ Work independently and don't worry about other developers - you have your own wo
         Returns:
             Agent: Configured resolver agent
         """
-        from crewai_tools import tool
+        from crewai.tools import tool
 
         # Create tools for the resolver agent
         @tool("Read Conflict")
@@ -447,15 +457,22 @@ Guidelines for resolution:
         logger.info("="*80)
 
         try:
-            # First, restart the merge (it was aborted earlier)
-            self.git_ops.repo.heads[integration_branch].checkout()
-            merge_result = self.git_ops.start_merge_with_conflicts(failed_branch)
+            # Check if merge is already in progress (MERGE_HEAD exists)
+            merge_head_path = os.path.join(self.git_ops.repo.git_dir, 'MERGE_HEAD')
+            if os.path.exists(merge_head_path):
+                # Merge already in progress - use the conflicting_files passed in
+                logger.info("Merge already in progress, using provided conflicting files")
+                merge_result = {"has_conflicts": True, "conflicting_files": conflicting_files}
+            else:
+                # No merge in progress - checkout and start fresh
+                self.git_ops.repo.heads[integration_branch].checkout()
+                merge_result = self.git_ops.start_merge_with_conflicts(failed_branch)
 
-            if not merge_result["has_conflicts"]:
-                # No conflicts this time - just complete the merge
-                self.git_ops.complete_merge(f"Merge {failed_branch} into {integration_branch}")
-                logger.info(f"Merge of {failed_branch} completed without conflicts on retry")
-                return True
+                if not merge_result["has_conflicts"]:
+                    # No conflicts this time - just complete the merge
+                    self.git_ops.complete_merge(f"Merge {failed_branch} into {integration_branch}")
+                    logger.info(f"Merge of {failed_branch} completed without conflicts on retry")
+                    return True
 
             # Create resolver agent and task
             resolver = self.create_resolver_agent()
@@ -495,14 +512,21 @@ Be careful to produce valid, working code in your resolutions.
             result = crew.kickoff()
             logger.info(f"Resolver completed: {result}")
 
-            # Verify merge was completed
+            # Verify merge was completed - check if MERGE_HEAD still exists
             try:
-                # Check if we're still in a merge state
-                self.git_ops.repo.git.status()
+                merge_head_path = os.path.join(self.git_ops.repo.git_dir, 'MERGE_HEAD')
+                if os.path.exists(merge_head_path):
+                    # Agent didn't complete the merge, do it ourselves
+                    logger.warning("Agent didn't complete merge, completing manually...")
+                    commit_msg = f"Merge {failed_branch} into {integration_branch} (conflicts resolved)"
+                    success = self.git_ops.complete_merge(commit_msg)
+                    if not success:
+                        logger.error("Failed to complete merge manually")
+                        return False
                 logger.info("Conflicts resolved successfully")
                 return True
-            except Exception:
-                logger.error("Merge may not have completed properly")
+            except Exception as e:
+                logger.error(f"Merge may not have completed properly: {e}")
                 return False
 
         except Exception as e:
@@ -564,9 +588,11 @@ Be careful to produce valid, working code in your resolutions.
 
         main_branch = self.config.get('main_branch', 'main')
 
+        # Use the pre-created integration branch with session ID
         result = self.git_ops.merge_branches_into_integration(
             feature_branches=self.feature_branches,
-            main_branch=main_branch
+            main_branch=main_branch,
+            integration_branch=self.integration_branch  # Use session-based integration branch
         )
 
         # If merge failed due to conflicts, try to resolve them
@@ -752,6 +778,14 @@ Be careful to produce valid, working code in your resolutions.
                     logger.info("[RESILIENT] Still waiting for tasks...")
                 return None
 
+            # Phase 1: Create integration branch from main and push to remote
+            main_branch = self.config.get('main_branch', 'main')
+            logger.info(f"Creating integration branch {self.integration_branch} from {main_branch}")
+            self.git_ops.create_branch_from_main(self.integration_branch, main_branch)
+            self.git_ops.push_branch(self.integration_branch)
+            logger.info(f"Pushed integration branch {self.integration_branch} to remote")
+
+            # Phase 2: Create feature branches from integration branch
             for feature_config in self.tasks_config:
                 agent, worktree_path = self.create_feature_agent(feature_config)
                 # Skip agents that failed to create
@@ -862,9 +896,10 @@ Be careful to produce valid, working code in your resolutions.
             # Post-completion Phase 2: Merge all branches into integration branch
             merge_result = self.merge_all_branches()
 
-            # Post-completion Phase 3: Create PR if merge succeeded
+            # Post-completion Phase 3: Create PR if merge succeeded and configured
             pr_url = None
-            if merge_result["success"] and merge_result["integration_branch"]:
+            create_pr = self.config.get('create_pr', False)  # Default: off (platform-specific)
+            if create_pr and merge_result["success"] and merge_result["integration_branch"]:
                 pr_url = self.create_pull_request(
                     integration_branch=merge_result["integration_branch"],
                     merged_branches=merge_result["merged_branches"],
@@ -981,6 +1016,35 @@ def main():
         except Exception as e:
             logger.error(f"Cleanup failed: {e}")
             return 1
+
+    # Pre-run check: detect existing worktrees in workspace
+    try:
+        git_ops = GitOperations(".")
+        all_worktrees = git_ops.list_worktrees()
+        # Filter for worktrees in our workspace directory (exclude main repo)
+        workspace_abs = str(workspace.absolute())
+        existing_worktrees = [w for w in all_worktrees if workspace_abs in w.get('path', '')]
+
+        if existing_worktrees:
+            logger.warning(f"Found {len(existing_worktrees)} existing worktree(s) in workspace")
+            if args.headless:
+                logger.info("Headless mode: auto-cleaning existing worktrees")
+                git_ops.cleanup_all_worktrees(str(workspace))
+            else:
+                print(f"\n⚠️  Existing worktrees detected ({len(existing_worktrees)} found):")
+                for wt in existing_worktrees:
+                    print(f"   - {wt.get('path', 'unknown')} ({wt.get('branch', 'no branch')})")
+                response = input("\nClean up before starting? [y/N]: ").strip().lower()
+                if response == 'y':
+                    logger.info("User requested cleanup")
+                    git_ops.cleanup_all_worktrees(str(workspace))
+                    logger.info("Cleanup complete")
+                else:
+                    logger.error("Cannot start with existing worktrees. Run with --cleanup-only first.")
+                    return 1
+    except Exception as e:
+        logger.warning(f"Pre-run worktree check failed: {e}")
+        # Continue anyway - this is a safety check, not critical
 
     # Create and run orchestrator
     orchestrator = MultiAgentOrchestrator(
