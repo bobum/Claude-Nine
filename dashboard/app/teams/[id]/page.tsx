@@ -1,22 +1,24 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   getTeamFull,
   getTeamReadiness,
-  startTeam,
-  stopTeam,
-  pauseTeam,
+  getRuns,
+  getRun,
+  createRun,
   deleteTeam,
   createWorkItem,
   type TeamWithWorkQueue,
   type TeamReadiness,
   type AgentTelemetry,
+  type Run,
+  type WorkItem,
 } from "@/lib/api";
 import { useWebSocket } from "@/lib/hooks";
-import AgentTelemetryCard from "@/components/AgentTelemetryCard";
+import RunExecutionView from "@/components/RunExecutionView";
 
 export default function TeamDetailPage() {
   const params = useParams();
@@ -25,11 +27,13 @@ export default function TeamDetailPage() {
 
   const [team, setTeam] = useState<TeamWithWorkQueue | null>(null);
   const [readiness, setReadiness] = useState<TeamReadiness | null>(null);
+  const [activeRun, setActiveRun] = useState<Run | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
-  const [agentTelemetry, setAgentTelemetry] = useState<Record<string, AgentTelemetry>>({});
+  const [taskTelemetry, setTaskTelemetry] = useState<Record<string, AgentTelemetry>>({});
   const [showAddWorkItem, setShowAddWorkItem] = useState(false);
   const [expandedWorkItem, setExpandedWorkItem] = useState<string | null>(null);
+  const [selectedWorkItems, setSelectedWorkItems] = useState<Set<string>>(new Set());
   const [newWorkItem, setNewWorkItem] = useState({
     external_id: "",
     source: "manual" as const,
@@ -43,7 +47,7 @@ export default function TeamDetailPage() {
   const wsUrl = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000/ws";
   const { lastMessage, isConnected } = useWebSocket(wsUrl);
 
-  const loadTeam = async () => {
+  const loadTeam = useCallback(async () => {
     try {
       const data = await getTeamFull(teamId);
       setTeam(data);
@@ -52,19 +56,41 @@ export default function TeamDetailPage() {
       const readinessData = await getTeamReadiness(teamId);
       setReadiness(readinessData);
 
+      // Check for active runs
+      const runs = await getRuns({ team_id: teamId, status: "running", limit: 1 });
+      if (runs.length > 0) {
+        const fullRun = await getRun(runs[0].id);
+        setActiveRun(fullRun);
+      } else {
+        // Check for pending or merging runs too
+        const pendingRuns = await getRuns({ team_id: teamId, status: "pending", limit: 1 });
+        if (pendingRuns.length > 0) {
+          const fullRun = await getRun(pendingRuns[0].id);
+          setActiveRun(fullRun);
+        } else {
+          const mergingRuns = await getRuns({ team_id: teamId, status: "merging", limit: 1 });
+          if (mergingRuns.length > 0) {
+            const fullRun = await getRun(mergingRuns[0].id);
+            setActiveRun(fullRun);
+          } else {
+            setActiveRun(null);
+          }
+        }
+      }
+
       setLoading(false);
     } catch (error) {
       console.error("Failed to load team:", error);
       setLoading(false);
     }
-  };
+  }, [teamId]);
 
   useEffect(() => {
     loadTeam();
-    // Refresh every 5 seconds for live updates
-    const interval = setInterval(loadTeam, 5000);
+    // Refresh every 3 seconds for live updates
+    const interval = setInterval(loadTeam, 3000);
     return () => clearInterval(interval);
-  }, [teamId]);
+  }, [loadTeam]);
 
   // Handle WebSocket messages for telemetry updates
   useEffect(() => {
@@ -72,12 +98,11 @@ export default function TeamDetailPage() {
       const message = lastMessage;
       console.log('[WebSocket] Received message:', message.type, message);
 
-      // Check if this is a telemetry update for an agent in this team
+      // Check if this is a telemetry update for a task in this team's active run
       if (message.type === "agent_telemetry" && message.team_id === teamId) {
         const telemetryData = message.data as AgentTelemetry;
-        console.log('[Telemetry] Received telemetry for agent:', telemetryData.agent_name, telemetryData);
-        console.log('[Telemetry] Current agent names:', team?.agents.map(a => a.name));
-        setAgentTelemetry((prev) => ({
+        console.log('[Telemetry] Received telemetry for agent:', telemetryData.agent_name);
+        setTaskTelemetry((prev) => ({
           ...prev,
           [telemetryData.agent_name]: telemetryData,
         }));
@@ -85,24 +110,44 @@ export default function TeamDetailPage() {
     }
   }, [lastMessage, teamId]);
 
-  const handleAction = async (
-    action: "start" | "stop" | "pause" | "delete"
-  ) => {
+  const handleDeleteTeam = async () => {
+    if (!confirm("Are you sure you want to delete this team?")) return;
+
     setActionLoading(true);
     try {
-      if (action === "start") {
-        await startTeam(teamId);
-      }
-      else if (action === "stop") await stopTeam(teamId);
-      else if (action === "pause") await pauseTeam(teamId);
-      else if (action === "delete") {
-        await deleteTeam(teamId);
-        router.push("/teams");
-        return;
-      }
+      await deleteTeam(teamId);
+      router.push("/teams");
+    } catch (error) {
+      console.error("Failed to delete team:", error);
+    }
+    setActionLoading(false);
+  };
+
+  const handleStartRun = async () => {
+    if (selectedWorkItems.size === 0) {
+      alert("Please select at least one work item to start a run");
+      return;
+    }
+
+    const maxTasks = team?.max_concurrent_tasks || 4;
+    if (maxTasks > 0 && selectedWorkItems.size > maxTasks) {
+      alert(`You can only run up to ${maxTasks} tasks concurrently. Please select fewer items.`);
+      return;
+    }
+
+    setActionLoading(true);
+    try {
+      const sessionId = `${Date.now().toString(36)}`;
+      const run = await createRun({
+        team_id: teamId,
+        session_id: sessionId,
+        selected_work_item_ids: Array.from(selectedWorkItems),
+      });
+      setActiveRun(run);
+      setSelectedWorkItems(new Set());
       await loadTeam();
     } catch (error) {
-      console.error(`Failed to ${action} team:`, error);
+      console.error("Failed to start run:", error);
     }
     setActionLoading(false);
   };
@@ -126,6 +171,25 @@ export default function TeamDetailPage() {
     }
   };
 
+  const toggleWorkItemSelection = (itemId: string) => {
+    setSelectedWorkItems((prev) => {
+      const next = new Set(prev);
+      if (next.has(itemId)) {
+        next.delete(itemId);
+      } else {
+        next.add(itemId);
+      }
+      return next;
+    });
+  };
+
+  const selectAllQueued = () => {
+    const queuedItems = team?.work_items.filter((item) => item.status === "queued") || [];
+    const maxTasks = team?.max_concurrent_tasks || 4;
+    const itemsToSelect = maxTasks > 0 ? queuedItems.slice(0, maxTasks) : queuedItems;
+    setSelectedWorkItems(new Set(itemsToSelect.map((item) => item.id)));
+  };
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case "active":
@@ -140,10 +204,23 @@ export default function TeamDetailPage() {
       case "error":
       case "blocked":
         return "bg-red-100 text-red-800";
+      case "queued":
+        return "bg-blue-100 text-blue-800";
+      case "in_progress":
+        return "bg-yellow-100 text-yellow-800";
+      case "completed":
+      case "pr_ready":
+        return "bg-green-100 text-green-800";
       default:
         return "bg-gray-100 text-gray-800";
     }
   };
+
+  const queuedWorkItems = team?.work_items.filter((item) => item.status === "queued") || [];
+  const completedWorkItems = team?.work_items.filter((item) =>
+    item.status === "completed" || item.status === "pr_ready"
+  ) || [];
+  const inProgressWorkItems = team?.work_items.filter((item) => item.status === "in_progress") || [];
 
   if (loading) {
     return (
@@ -186,48 +263,12 @@ export default function TeamDetailPage() {
             <span className="text-lg">{team.name}</span>
           </div>
           <div className="flex gap-2">
-            {team.status === "stopped" && (
-              <button
-                onClick={() => handleAction("start")}
-                disabled={actionLoading || !readiness?.is_ready}
-                className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded-md text-sm font-medium disabled:opacity-50"
-              >
-                Start
-              </button>
-            )}
-            {team.status === "active" && (
-              <>
-                <button
-                  onClick={() => handleAction("pause")}
-                  disabled={actionLoading}
-                  className="bg-yellow-600 hover:bg-yellow-700 px-4 py-2 rounded-md text-sm font-medium disabled:opacity-50"
-                >
-                  Pause
-                </button>
-                <button
-                  onClick={() => handleAction("stop")}
-                  disabled={actionLoading}
-                  className="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded-md text-sm font-medium disabled:opacity-50"
-                >
-                  Stop
-                </button>
-              </>
-            )}
-            {team.status === "paused" && (
-              <button
-                onClick={() => handleAction("start")}
-                disabled={actionLoading}
-                className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded-md text-sm font-medium disabled:opacity-50"
-              >
-                Resume
-              </button>
-            )}
             <button
-              onClick={() => handleAction("delete")}
-              disabled={actionLoading}
+              onClick={handleDeleteTeam}
+              disabled={actionLoading || !!activeRun}
               className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded-md text-sm font-medium disabled:opacity-50"
             >
-              Delete
+              Delete Team
             </button>
           </div>
         </div>
@@ -235,132 +276,102 @@ export default function TeamDetailPage() {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto py-8 px-6">
-        {/* START Button Requirements Info */}
-        {readiness && !readiness.is_ready && (
-          <div className="bg-blue-50 border-l-4 border-blue-400 p-6 mb-6 rounded-lg">
-            <div className="flex items-start">
-              <div className="flex-shrink-0">
-                <svg
-                  className="h-6 w-6 text-blue-400"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
-                </svg>
-              </div>
-              <div className="ml-4 flex-1">
-                <h3 className="text-lg font-medium text-blue-800 mb-2">
-                  START Button Requirements
-                </h3>
-                <div className="text-sm text-blue-700 space-y-2">
-                  <p className="mb-3">
-                    To enable the START button, the following requirements must be met:
-                  </p>
-                  <ul className="space-y-2">
-                    <li className="flex items-center gap-2">
-                      <span className="text-lg">
-                        {readiness.checks.is_git_repository ? '✅' : '❌'}
-                      </span>
-                      <span>
-                        {readiness.checks.is_git_repository
-                          ? 'Valid git repository'
-                          : 'Repository must be a valid git repository'}
-                      </span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <span className="text-lg">
-                        {readiness.queued_work_count > 0 ? '✅' : '❌'}
-                      </span>
-                      <span>
-                        {readiness.queued_work_count > 0
-                          ? `${readiness.queued_work_count} work item(s) queued`
-                          : 'Add at least one work item to the queue'}
-                      </span>
-                    </li>
-                  </ul>
-                  {readiness.is_ready && (
-                    <p className="mt-3 font-medium text-green-700">
-                      ✅ All requirements met! You can now START the team.
-                    </p>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        <div className="bg-white rounded-lg shadow p-6 mb-6">
+        {/* Team Info */}
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-6">
           <div className="flex justify-between items-start">
             <div>
-              <h1 className="text-3xl font-bold text-gray-900 mb-2">
+              <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-2">
                 {team.name}
               </h1>
-              <p className="text-gray-600 mb-4">{team.product}</p>
-              <div className="flex gap-4 text-sm text-gray-500">
-                <span>📁 {team.repo_path}</span>
-                <span>🌿 {team.main_branch}</span>
+              <p className="text-gray-600 dark:text-gray-400 mb-4">{team.product}</p>
+              <div className="flex gap-4 text-sm text-gray-500 dark:text-gray-400">
+                <span>Repo: {team.repo_path}</span>
+                <span>Branch: {team.main_branch}</span>
+                <span>Max concurrent: {team.max_concurrent_tasks || 4}</span>
               </div>
             </div>
             <span
-              className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(
-                team.status
-              )}`}
+              className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(team.status)}`}
             >
               {team.status}
             </span>
           </div>
         </div>
 
-        {/* Agent Telemetry Grid */}
-        {team.status === "active" && team.agents.length > 0 && (
+        {/* Active Run View */}
+        {activeRun && (
           <div className="mb-6">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-2xl font-semibold text-gray-900 dark:text-gray-100">
-                Agent Telemetry
-              </h2>
-              <div className="flex items-center gap-2">
-                <div
-                  className={`w-3 h-3 rounded-full ${
-                    isConnected ? "bg-green-500" : "bg-red-500"
-                  }`}
-                ></div>
-                <span className="text-sm text-gray-600 dark:text-gray-400">
-                  {isConnected ? "Connected" : "Disconnected"}
-                </span>
-              </div>
-            </div>
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {team.agents.map((agent) => (
-                <AgentTelemetryCard
-                  key={agent.id}
-                  agent={agent}
-                  telemetry={agentTelemetry[agent.name] || null}
-                />
-              ))}
-            </div>
+            <RunExecutionView
+              run={activeRun}
+              taskTelemetry={taskTelemetry}
+              onCancel={loadTeam}
+              isConnected={isConnected}
+            />
           </div>
         )}
 
-        <div className="grid gap-6">
-          {/* Work Queue */}
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+        {/* Work Queue - Show when no active run */}
+        {!activeRun && (
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-6">
             <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
-                Work Queue ({team.work_items.length})
-              </h2>
-              <button
-                onClick={() => setShowAddWorkItem(!showAddWorkItem)}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm font-medium"
-              >
-                + Add Work Item
-              </button>
+              <div>
+                <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
+                  Work Queue ({queuedWorkItems.length} queued)
+                </h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                  Select work items to start a run (max: {team.max_concurrent_tasks || 4})
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={selectAllQueued}
+                  className="bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 px-3 py-1 rounded text-sm font-medium"
+                >
+                  Select All (up to max)
+                </button>
+                <button
+                  onClick={() => setShowAddWorkItem(!showAddWorkItem)}
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm font-medium"
+                >
+                  + Add Work Item
+                </button>
+              </div>
             </div>
+
+            {/* Start Run Button */}
+            {selectedWorkItems.size > 0 && (
+              <div className="mb-4 p-4 bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 rounded-lg flex justify-between items-center">
+                <div>
+                  <p className="font-medium text-green-800 dark:text-green-200">
+                    {selectedWorkItems.size} item(s) selected
+                  </p>
+                  <p className="text-sm text-green-600 dark:text-green-400">
+                    Ready to start a new run
+                  </p>
+                </div>
+                <button
+                  onClick={handleStartRun}
+                  disabled={actionLoading || !readiness?.is_ready}
+                  className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-md font-medium disabled:opacity-50"
+                >
+                  {actionLoading ? "Starting..." : "Start Run"}
+                </button>
+              </div>
+            )}
+
+            {/* Readiness Check */}
+            {readiness && !readiness.is_ready && (
+              <div className="mb-4 p-4 bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+                <h3 className="font-medium text-yellow-800 dark:text-yellow-200 mb-2">
+                  Cannot start run
+                </h3>
+                <ul className="text-sm text-yellow-600 dark:text-yellow-400 space-y-1">
+                  {readiness.issues.map((issue, idx) => (
+                    <li key={idx}>- {issue}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             {showAddWorkItem && (
               <form onSubmit={handleAddWorkItem} className="mb-4 p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
@@ -436,100 +447,168 @@ export default function TeamDetailPage() {
                 </div>
               </form>
             )}
-            {team.work_items.length === 0 ? (
-              <p className="text-gray-500 text-center py-8">No work items</p>
+
+            {/* Queued Work Items */}
+            {queuedWorkItems.length === 0 ? (
+              <p className="text-gray-500 dark:text-gray-400 text-center py-8">
+                No work items in queue. Add some work items to get started.
+              </p>
             ) : (
-              <div className="space-y-3">
-                {[...team.work_items].reverse().map((item) => {
-                  const isExpanded = expandedWorkItem === item.id;
-                  return (
-                    <div
-                      key={item.id}
-                      onClick={() => setExpandedWorkItem(isExpanded ? null : item.id)}
-                      className="border rounded p-4 hover:bg-gray-50 cursor-pointer transition-all"
-                    >
-                      <div className="flex justify-between items-start mb-2">
-                        <div className="flex-1">
-                          <span className="text-xs text-gray-500">
+              <div className="space-y-2">
+                {queuedWorkItems.map((item) => (
+                  <div
+                    key={item.id}
+                    onClick={() => toggleWorkItemSelection(item.id)}
+                    className={`border rounded-lg p-4 cursor-pointer transition-all ${
+                      selectedWorkItems.has(item.id)
+                        ? "border-green-500 bg-green-50 dark:bg-green-900/30"
+                        : "border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700"
+                    }`}
+                  >
+                    <div className="flex justify-between items-start">
+                      <div className="flex items-start gap-3">
+                        <input
+                          type="checkbox"
+                          checked={selectedWorkItems.has(item.id)}
+                          onChange={() => {}}
+                          className="mt-1 h-4 w-4 rounded border-gray-300"
+                        />
+                        <div>
+                          <span className="text-xs text-gray-500 dark:text-gray-400">
                             {item.source} #{item.external_id}
                           </span>
-                          <h3 className="font-semibold">{item.title}</h3>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span
-                            className={`px-2 py-1 rounded text-xs font-medium ${getStatusColor(
-                              item.status
-                            )}`}
-                          >
-                            {item.status}
-                          </span>
-                          <span className="text-gray-400">
-                            {isExpanded ? '▼' : '▶'}
-                          </span>
+                          <h3 className="font-semibold text-gray-900 dark:text-gray-100">
+                            {item.title}
+                          </h3>
+                          {item.description && (
+                            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1 line-clamp-2">
+                              {item.description}
+                            </p>
+                          )}
                         </div>
                       </div>
-                      
-                      {!isExpanded && item.description && (
-                        <p className="text-sm text-gray-600 mb-2">
-                          {item.description.substring(0, 100)}...
-                        </p>
-                      )}
-                      
-                      {isExpanded && (
-                        <div className="mt-4 space-y-3 bg-gray-50 p-4 rounded">
-                          <div>
-                            <h4 className="text-sm font-semibold text-gray-700 mb-1">Description</h4>
-                            <p className="text-sm text-gray-600 whitespace-pre-wrap">
-                              {item.description || 'No description'}
-                            </p>
-                          </div>
-                          
-                          <div className="grid grid-cols-2 gap-4">
-                            <div>
-                              <h4 className="text-sm font-semibold text-gray-700 mb-1">Source</h4>
-                              <p className="text-sm text-gray-600">{item.source}</p>
-                            </div>
-                            <div>
-                              <h4 className="text-sm font-semibold text-gray-700 mb-1">External ID</h4>
-                              <p className="text-sm text-gray-600">{item.external_id}</p>
-                            </div>
-                            {item.priority !== null && (
-                              <div>
-                                <h4 className="text-sm font-semibold text-gray-700 mb-1">Priority</h4>
-                                <p className="text-sm text-gray-600">{item.priority}</p>
-                              </div>
-                            )}
-                            {item.story_points && (
-                              <div>
-                                <h4 className="text-sm font-semibold text-gray-700 mb-1">Story Points</h4>
-                                <p className="text-sm text-gray-600">{item.story_points}</p>
-                              </div>
-                            )}
-                            <div>
-                              <h4 className="text-sm font-semibold text-gray-700 mb-1">Status</h4>
-                              <p className="text-sm text-gray-600">{item.status}</p>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                      
-                      {!isExpanded && (
-                        <div className="flex gap-4 text-xs text-gray-500 mt-2">
-                          {item.priority !== null && (
-                            <span>Priority: {item.priority}</span>
-                          )}
-                          {item.story_points && (
-                            <span>Points: {item.story_points}</span>
-                          )}
-                        </div>
-                      )}
+                      <div className="flex items-center gap-2">
+                        {item.priority !== null && (
+                          <span className="px-2 py-1 bg-gray-100 dark:bg-gray-700 rounded text-xs">
+                            P{item.priority}
+                          </span>
+                        )}
+                        <span
+                          className={`px-2 py-1 rounded text-xs font-medium ${getStatusColor(
+                            item.status
+                          )}`}
+                        >
+                          {item.status}
+                        </span>
+                      </div>
                     </div>
-                  );
-                })}
+                  </div>
+                ))}
               </div>
             )}
           </div>
-        </div>
+        )}
+
+        {/* In Progress Work Items */}
+        {inProgressWorkItems.length > 0 && !activeRun && (
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-6">
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">
+              In Progress ({inProgressWorkItems.length})
+            </h2>
+            <div className="space-y-2">
+              {inProgressWorkItems.map((item) => (
+                <div
+                  key={item.id}
+                  className="border border-yellow-200 dark:border-yellow-800 rounded-lg p-4 bg-yellow-50 dark:bg-yellow-900/20"
+                >
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <span className="text-xs text-gray-500">
+                        {item.source} #{item.external_id}
+                      </span>
+                      <h3 className="font-semibold text-gray-900 dark:text-gray-100">{item.title}</h3>
+                    </div>
+                    <span className={`px-2 py-1 rounded text-xs font-medium ${getStatusColor(item.status)}`}>
+                      {item.status}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Completed Work Items */}
+        {completedWorkItems.length > 0 && (
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">
+              Completed ({completedWorkItems.length})
+            </h2>
+            <div className="space-y-2">
+              {completedWorkItems.map((item) => (
+                <div
+                  key={item.id}
+                  onClick={() => setExpandedWorkItem(expandedWorkItem === item.id ? null : item.id)}
+                  className="border border-green-200 dark:border-green-800 rounded-lg p-4 bg-green-50 dark:bg-green-900/20 cursor-pointer"
+                >
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <span className="text-xs text-gray-500">
+                        {item.source} #{item.external_id}
+                      </span>
+                      <h3 className="font-semibold text-gray-900 dark:text-gray-100">{item.title}</h3>
+                      {expandedWorkItem === item.id && (
+                        <div className="mt-3 text-sm text-gray-600 dark:text-gray-400 space-y-2">
+                          {item.description && <p>{item.description}</p>}
+                          <div className="grid grid-cols-2 gap-2">
+                            {item.branch_name && (
+                              <div>
+                                <span className="font-medium">Branch:</span>{" "}
+                                <code className="text-xs">{item.branch_name}</code>
+                              </div>
+                            )}
+                            {item.commits_count !== null && (
+                              <div>
+                                <span className="font-medium">Commits:</span> {item.commits_count}
+                              </div>
+                            )}
+                            {item.files_changed_count !== null && (
+                              <div>
+                                <span className="font-medium">Files changed:</span>{" "}
+                                {item.files_changed_count}
+                              </div>
+                            )}
+                            {item.pr_url && (
+                              <div>
+                                <a
+                                  href={item.pr_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-blue-600 hover:underline"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  View PR
+                                </a>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`px-2 py-1 rounded text-xs font-medium ${getStatusColor(item.status)}`}>
+                        {item.status}
+                      </span>
+                      <span className="text-gray-400">
+                        {expandedWorkItem === item.id ? "v" : ">"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );

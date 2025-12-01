@@ -8,6 +8,7 @@ export interface Team {
   product: string;
   repo_path: string;
   main_branch: string;
+  max_concurrent_tasks: number | null;
   status: "active" | "paused" | "stopped" | "error";
   created_at: string;
   updated_at: string;
