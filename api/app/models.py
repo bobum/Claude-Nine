@@ -52,6 +52,7 @@ class Team(Base):
     product = Column(String(255), nullable=False)
     repo_path = Column(String(500), nullable=False)
     main_branch = Column(String(100), default="main")
+    max_concurrent_tasks = Column(Integer, default=4)  # 0 = unlimited
     status = Column(String(50), nullable=False, default="stopped")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -61,6 +62,7 @@ class Team(Base):
     work_items = relationship("WorkItem", back_populates="team")
     integrations = relationship("Integration", back_populates="team", cascade="all, delete-orphan")
     activity_logs = relationship("ActivityLog", back_populates="team", cascade="all, delete-orphan")
+    runs = relationship("Run", back_populates="team", cascade="all, delete-orphan")
 
     # Constraints
     __table_args__ = (
@@ -176,3 +178,57 @@ class ActivityLog(Base):
     team = relationship("Team", back_populates="activity_logs")
     agent = relationship("Agent", back_populates="activity_logs")
     work_item = relationship("WorkItem", back_populates="activity_logs")
+
+class Run(Base):
+    """Tracks an orchestrator run/session"""
+    __tablename__ = "runs"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    team_id = Column(GUID(), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)
+    session_id = Column(String(50), nullable=False)  # Short ID like "a31608fb"
+    status = Column(String(50), nullable=False, default="pending")
+    integration_branch = Column(String(255))  # e.g., "integration/a31608fb"
+    started_at = Column(DateTime(timezone=True))
+    completed_at = Column(DateTime(timezone=True))
+    error_message = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    team = relationship("Team", back_populates="runs")
+    tasks = relationship("RunTask", back_populates="run", cascade="all, delete-orphan")
+
+    # Constraints
+    __table_args__ = (
+        CheckConstraint(status.in_(['pending', 'running', 'merging', 'completed', 'failed', 'cancelled']),
+                       name='runs_status_check'),
+    )
+
+
+class RunTask(Base):
+    """Tracks individual task execution within a run"""
+    __tablename__ = "run_tasks"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    run_id = Column(GUID(), ForeignKey("runs.id", ondelete="CASCADE"), nullable=False)
+    work_item_id = Column(GUID(), ForeignKey("work_items.id", ondelete="SET NULL"))
+    agent_name = Column(String(255))  # Transitory agent name for this task
+    branch_name = Column(String(255))
+    worktree_path = Column(String(500))
+    status = Column(String(50), nullable=False, default="pending")
+    telemetry_data = Column(JSON)  # Live telemetry streaming data
+    error_message = Column(Text)
+    started_at = Column(DateTime(timezone=True))
+    completed_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    run = relationship("Run", back_populates="tasks")
+    work_item = relationship("WorkItem")
+
+    # Constraints
+    __table_args__ = (
+        CheckConstraint(status.in_(['pending', 'running', 'completed', 'failed', 'retrying']),
+                       name='run_tasks_status_check'),
+    )

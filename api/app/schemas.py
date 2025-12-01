@@ -36,12 +36,30 @@ class WorkItemSource(str, Enum):
     manual = "manual"
 
 
+class RunStatus(str, Enum):
+    pending = "pending"
+    running = "running"
+    merging = "merging"
+    completed = "completed"
+    failed = "failed"
+    cancelled = "cancelled"
+
+
+class RunTaskStatus(str, Enum):
+    pending = "pending"
+    running = "running"
+    completed = "completed"
+    failed = "failed"
+    retrying = "retrying"
+
+
 # Team schemas
 class TeamBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     product: str = Field(..., min_length=1, max_length=255)
     repo_path: str
     main_branch: str = "main"
+    max_concurrent_tasks: int = 4  # 0 = unlimited
 
 
 class TeamCreate(TeamBase):
@@ -52,6 +70,7 @@ class TeamUpdate(BaseModel):
     name: Optional[str] = None
     product: Optional[str] = None
     repo_path: Optional[str] = None
+    max_concurrent_tasks: Optional[int] = None
     status: Optional[TeamStatus] = None
 
 
@@ -156,6 +175,68 @@ class TeamWithAgents(Team):
 class TeamWithWorkQueue(Team):
     agents: List[Agent] = []
     work_items: List[WorkItem] = []
+
+    class Config:
+        from_attributes = True
+
+# Run schemas (orchestrator session tracking)
+class RunBase(BaseModel):
+    session_id: str
+
+
+class RunCreate(RunBase):
+    team_id: UUID4
+    selected_work_item_ids: List[UUID4] = []
+
+
+class RunTaskBase(BaseModel):
+    work_item_id: Optional[UUID4] = None
+    agent_name: Optional[str] = None
+
+
+class RunTask(RunTaskBase):
+    id: UUID4
+    run_id: UUID4
+    branch_name: Optional[str] = None
+    worktree_path: Optional[str] = None
+    status: RunTaskStatus
+    telemetry_data: Optional[dict] = None
+    error_message: Optional[str] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    created_at: datetime
+    work_item: Optional[WorkItem] = None
+
+    class Config:
+        from_attributes = True
+
+
+class Run(RunBase):
+    id: UUID4
+    team_id: UUID4
+    status: RunStatus
+    integration_branch: Optional[str] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    error_message: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    tasks: List[RunTask] = []
+
+    class Config:
+        from_attributes = True
+
+
+class RunWithTasks(Run):
+    tasks: List[RunTask] = []
+
+    class Config:
+        from_attributes = True
+
+
+# Team with runs
+class TeamWithRuns(Team):
+    runs: List[Run] = []
 
     class Config:
         from_attributes = True
