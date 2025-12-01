@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from .database import engine, get_db, Base
 from .config import settings
-from .routes import teams, work_items, personas, telemetry
+from .routes import teams, work_items, personas, telemetry, runs
 from .routes import settings as settings_router
 from .websocket import manager
 
@@ -70,6 +70,7 @@ app.include_router(work_items.router, prefix="/api/work-items", tags=["work-item
 app.include_router(personas.router, prefix="/api/personas", tags=["personas"])
 app.include_router(settings_router.router, prefix="/api/settings", tags=["settings"])
 app.include_router(telemetry.router, prefix="/api/telemetry", tags=["telemetry"])
+app.include_router(runs.router, prefix="/api/runs", tags=["runs"])
 
 
 # WebSocket endpoint

@@ -8,6 +8,7 @@ export interface Team {
   product: string;
   repo_path: string;
   main_branch: string;
+  max_concurrent_tasks: number | null;
   status: "active" | "paused" | "stopped" | "error";
   created_at: string;
   updated_at: string;
@@ -274,4 +275,126 @@ export interface AgentTelemetry {
   git_activities: GitActivity[];
   activity_logs: ActivityLog[];
   timestamp: string;
+}
+
+// Run Types (orchestrator session tracking)
+export type RunStatus = "pending" | "running" | "merging" | "completed" | "failed" | "cancelled";
+export type RunTaskStatus = "pending" | "running" | "completed" | "failed" | "retrying";
+
+export interface RunTask {
+  id: string;
+  run_id: string;
+  work_item_id: string | null;
+  agent_name: string | null;
+  branch_name: string | null;
+  worktree_path: string | null;
+  status: RunTaskStatus;
+  telemetry_data: Record<string, unknown> | null;
+  error_message: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+  work_item?: WorkItem;
+}
+
+export interface Run {
+  id: string;
+  team_id: string;
+  session_id: string;
+  status: RunStatus;
+  integration_branch: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+  tasks: RunTask[];
+}
+
+// Runs API
+export async function getRuns(filters?: {
+  team_id?: string;
+  status?: RunStatus;
+  limit?: number;
+}): Promise<Run[]> {
+  const params = new URLSearchParams();
+  if (filters?.team_id) params.append("team_id", filters.team_id);
+  if (filters?.status) params.append("status", filters.status);
+  if (filters?.limit) params.append("limit", filters.limit.toString());
+
+  const response = await fetch(`${API_BASE_URL}/api/runs/?${params.toString()}`);
+  if (!response.ok) throw new Error("Failed to fetch runs");
+  return response.json();
+}
+
+export async function createRun(data: {
+  team_id: string;
+  session_id: string;
+  selected_work_item_ids: string[];
+}): Promise<Run> {
+  const response = await fetch(`${API_BASE_URL}/api/runs/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!response.ok) throw new Error("Failed to create run");
+  return response.json();
+}
+
+export async function getRun(runId: string): Promise<Run> {
+  const response = await fetch(`${API_BASE_URL}/api/runs/${runId}`);
+  if (!response.ok) throw new Error("Failed to fetch run");
+  return response.json();
+}
+
+export async function updateRunStatus(
+  runId: string,
+  status: RunStatus,
+  errorMessage?: string
+): Promise<Run> {
+  const params = new URLSearchParams();
+  params.append("status", status);
+  if (errorMessage) params.append("error_message", errorMessage);
+
+  const response = await fetch(`${API_BASE_URL}/api/runs/${runId}/status?${params.toString()}`, {
+    method: "PATCH",
+  });
+  if (!response.ok) throw new Error("Failed to update run status");
+  return response.json();
+}
+
+export async function updateRunTask(
+  runId: string,
+  taskId: string,
+  updates: {
+    status?: RunTaskStatus;
+    agent_name?: string;
+    branch_name?: string;
+    worktree_path?: string;
+    telemetry_data?: Record<string, unknown>;
+    error_message?: string;
+  }
+): Promise<RunTask> {
+  const params = new URLSearchParams();
+  if (updates.status) params.append("status", updates.status);
+  if (updates.agent_name) params.append("agent_name", updates.agent_name);
+  if (updates.branch_name) params.append("branch_name", updates.branch_name);
+  if (updates.worktree_path) params.append("worktree_path", updates.worktree_path);
+  if (updates.error_message) params.append("error_message", updates.error_message);
+
+  const response = await fetch(`${API_BASE_URL}/api/runs/${runId}/tasks/${taskId}?${params.toString()}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: updates.telemetry_data ? JSON.stringify({ telemetry_data: updates.telemetry_data }) : undefined,
+  });
+  if (!response.ok) throw new Error("Failed to update run task");
+  return response.json();
+}
+
+export async function cancelRun(runId: string): Promise<Run> {
+  const response = await fetch(`${API_BASE_URL}/api/runs/${runId}/cancel`, {
+    method: "POST",
+  });
+  if (!response.ok) throw new Error("Failed to cancel run");
+  return response.json();
 }

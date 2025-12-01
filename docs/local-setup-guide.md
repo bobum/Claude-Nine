@@ -491,9 +491,14 @@ docker run -p 8000:8000 -v $(pwd)/api/claude_nine.db:/app/claude_nine.db claude-
 ## Next Steps
 
 1. **Complete the Tutorial**: Follow the in-app guide when you visit http://localhost:3000
-2. **Create Your First Team**: Teams → New Team → Add Agents
-3. **Add Work Items**: Work Items → New Work Item
-4. **Start Building**: Assign work to your team and watch them code!
+2. **Create Your First Team**: Teams → New Team (link to your git repository)
+3. **Add Work Items**: Work Items → New Work Item (or import from Azure DevOps/Jira/GitHub)
+4. **Start a Run**:
+   - Select work items from the queue (up to max concurrent tasks)
+   - Click "Start Run" - agents spawn automatically (1 per work item)
+   - Monitor live telemetry in TaskCards
+   - Watch the merge phase combine all work into an integration branch
+5. **Create PR**: When complete, the integration branch is ready to push and create a PR
 
 ## Additional Resources
 
