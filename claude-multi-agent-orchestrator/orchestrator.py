@@ -20,6 +20,7 @@ import signal
 import atexit
 import subprocess
 import requests
+import uuid
 from typing import List, Dict, Any, Tuple, Optional
 from datetime import datetime
 from pathlib import Path
@@ -56,7 +57,7 @@ class MultiAgentOrchestrator:
     - Automatic cleanup of worktrees on shutdown
     """
 
-    def __init__(self, config_path: str = "config.yaml", tasks_path: str = "tasks/example_tasks.yaml", team_id: str = None):
+    def __init__(self, config_path: str = "config.yaml", tasks_path: str = "tasks/example_tasks.yaml", team_id: str = None, headless_mode: bool = False):
         """
         Initialize the orchestrator.
 
@@ -64,6 +65,7 @@ class MultiAgentOrchestrator:
             config_path: Path to configuration file
             tasks_path: Path to tasks definition file
             team_id: Team ID for API integration (optional)
+            headless_mode: If True, write telemetry to files instead of API
         """
         self.config = self._load_config(config_path)
         self.tasks_config = self._load_tasks(tasks_path)
@@ -87,20 +89,33 @@ class MultiAgentOrchestrator:
         self.feature_branches: List[str] = []
         self.running = True
 
+        # Session ID for unique branch naming (8-char GUID)
+        self.session_id = str(uuid.uuid4()).replace('-', '')[:8]
+        self.integration_branch = f"integration/{self.session_id}"
+        logger.info(f"Session ID: {self.session_id}")
+
         # Telemetry
         self.team_id = team_id
+        self.headless_mode = headless_mode
+        if headless_mode:
+            logger.info("Running in headless mode - telemetry will be written to files")
 
-        # Set up API key
-        if 'anthropic_api_key' in self.config and self.config['anthropic_api_key']:
-            os.environ['ANTHROPIC_API_KEY'] = self.config['anthropic_api_key']
-            logger.info(f"Set ANTHROPIC_API_KEY from config: {self.config['anthropic_api_key'][:20]}...")
+        # Set up API key - environment variable takes precedence over config
+        env_api_key = os.getenv('ANTHROPIC_API_KEY')
+        config_api_key = self.config.get('anthropic_api_key', '')
+
+        if env_api_key and env_api_key.startswith('sk-'):
+            # Environment variable is set with a valid-looking key
+            logger.info(f"Using ANTHROPIC_API_KEY from environment: {env_api_key[:20]}...")
+        elif config_api_key and config_api_key.startswith('sk-'):
+            # Use config value as fallback (only if it looks like a real key)
+            os.environ['ANTHROPIC_API_KEY'] = config_api_key
+            logger.info(f"Set ANTHROPIC_API_KEY from config: {config_api_key[:20]}...")
+        elif env_api_key:
+            # Env var exists but doesn't look like a key
+            logger.warning(f"ANTHROPIC_API_KEY in env doesn't look valid: {env_api_key[:20]}...")
         else:
-            logger.warning(f"No API key in config. Config keys: {list(self.config.keys())}")
-            # Check if it's in environment already
-            if os.getenv('ANTHROPIC_API_KEY'):
-                logger.info(f"ANTHROPIC_API_KEY found in environment: {os.getenv('ANTHROPIC_API_KEY')[:20]}...")
-            else:
-                logger.error("ANTHROPIC_API_KEY not found in config or environment!")
+            logger.error("ANTHROPIC_API_KEY not found in environment or config!")
 
         # Register cleanup handler
         atexit.register(self.cleanup)
@@ -187,22 +202,24 @@ class MultiAgentOrchestrator:
         agent_name = feature_config.get('name', 'Feature Developer')
         agent_role = feature_config.get('role', f"{agent_name} Developer")
         agent_goal = feature_config.get('goal', f"Implement {agent_name}")
-        branch_name = feature_config.get('branch', f"feature/{agent_name}")
+        # Append session ID to branch name for uniqueness
+        base_branch = feature_config.get('branch', f"feature/{agent_name}")
+        branch_name = f"{base_branch}-{self.session_id}"
 
         # Track branch for post-completion merge
         self.feature_branches.append(branch_name)
 
-        # Create isolated worktree for this agent
-        worktree_path = self.workspace_dir / f"worktree-{agent_name}"
+        # Create isolated worktree for this agent (include session ID for uniqueness)
+        worktree_path = self.workspace_dir / f"worktree-{agent_name}-{self.session_id}"
 
         logger.info(f"Creating worktree for {agent_name} at {worktree_path}")
 
         try:
-            main_branch = self.config.get('main_branch', 'main')
+            # Feature branches are created from integration branch, not main
             worktree_abs_path = self.git_ops.create_worktree(
                 branch_name=branch_name,
                 worktree_path=str(worktree_path),
-                main_branch=main_branch
+                main_branch=self.integration_branch  # Branch from integration
             )
 
             # Track for cleanup
@@ -264,7 +281,9 @@ Always make commits with descriptive messages. Work independently and focus on y
         Returns:
             Task: Configured CrewAI task
         """
-        branch_name = feature_config.get('branch', f"feature/{feature_config['name']}")
+        # Include session ID in branch name for consistency with create_feature_agent
+        base_branch = feature_config.get('branch', f"feature/{feature_config['name']}")
+        branch_name = f"{base_branch}-{self.session_id}"
         description = feature_config.get('description', '')
         expected_output = feature_config.get('expected_output', 'Feature implemented and committed')
 
@@ -309,7 +328,7 @@ Work independently and don't worry about other developers - you have your own wo
         Returns:
             Agent: Configured resolver agent
         """
-        from crewai_tools import tool
+        from crewai.tools import tool
 
         # Create tools for the resolver agent
         @tool("Read Conflict")
@@ -438,15 +457,22 @@ Guidelines for resolution:
         logger.info("="*80)
 
         try:
-            # First, restart the merge (it was aborted earlier)
-            self.git_ops.repo.heads[integration_branch].checkout()
-            merge_result = self.git_ops.start_merge_with_conflicts(failed_branch)
+            # Check if merge is already in progress (MERGE_HEAD exists)
+            merge_head_path = os.path.join(self.git_ops.repo.git_dir, 'MERGE_HEAD')
+            if os.path.exists(merge_head_path):
+                # Merge already in progress - use the conflicting_files passed in
+                logger.info("Merge already in progress, using provided conflicting files")
+                merge_result = {"has_conflicts": True, "conflicting_files": conflicting_files}
+            else:
+                # No merge in progress - checkout and start fresh
+                self.git_ops.repo.heads[integration_branch].checkout()
+                merge_result = self.git_ops.start_merge_with_conflicts(failed_branch)
 
-            if not merge_result["has_conflicts"]:
-                # No conflicts this time - just complete the merge
-                self.git_ops.complete_merge(f"Merge {failed_branch} into {integration_branch}")
-                logger.info(f"Merge of {failed_branch} completed without conflicts on retry")
-                return True
+                if not merge_result["has_conflicts"]:
+                    # No conflicts this time - just complete the merge
+                    self.git_ops.complete_merge(f"Merge {failed_branch} into {integration_branch}")
+                    logger.info(f"Merge of {failed_branch} completed without conflicts on retry")
+                    return True
 
             # Create resolver agent and task
             resolver = self.create_resolver_agent()
@@ -486,14 +512,21 @@ Be careful to produce valid, working code in your resolutions.
             result = crew.kickoff()
             logger.info(f"Resolver completed: {result}")
 
-            # Verify merge was completed
+            # Verify merge was completed - check if MERGE_HEAD still exists
             try:
-                # Check if we're still in a merge state
-                self.git_ops.repo.git.status()
+                merge_head_path = os.path.join(self.git_ops.repo.git_dir, 'MERGE_HEAD')
+                if os.path.exists(merge_head_path):
+                    # Agent didn't complete the merge, do it ourselves
+                    logger.warning("Agent didn't complete merge, completing manually...")
+                    commit_msg = f"Merge {failed_branch} into {integration_branch} (conflicts resolved)"
+                    success = self.git_ops.complete_merge(commit_msg)
+                    if not success:
+                        logger.error("Failed to complete merge manually")
+                        return False
                 logger.info("Conflicts resolved successfully")
                 return True
-            except Exception:
-                logger.error("Merge may not have completed properly")
+            except Exception as e:
+                logger.error(f"Merge may not have completed properly: {e}")
                 return False
 
         except Exception as e:
@@ -555,9 +588,11 @@ Be careful to produce valid, working code in your resolutions.
 
         main_branch = self.config.get('main_branch', 'main')
 
+        # Use the pre-created integration branch with session ID
         result = self.git_ops.merge_branches_into_integration(
             feature_branches=self.feature_branches,
-            main_branch=main_branch
+            main_branch=main_branch,
+            integration_branch=self.integration_branch  # Use session-based integration branch
         )
 
         # If merge failed due to conflicts, try to resolve them
@@ -743,6 +778,14 @@ Be careful to produce valid, working code in your resolutions.
                     logger.info("[RESILIENT] Still waiting for tasks...")
                 return None
 
+            # Phase 1: Create integration branch from main and push to remote
+            main_branch = self.config.get('main_branch', 'main')
+            logger.info(f"Creating integration branch {self.integration_branch} from {main_branch}")
+            self.git_ops.create_branch_from_main(self.integration_branch, main_branch)
+            self.git_ops.push_branch(self.integration_branch)
+            logger.info(f"Pushed integration branch {self.integration_branch} to remote")
+
+            # Phase 2: Create feature branches from integration branch
             for feature_config in self.tasks_config:
                 agent, worktree_path = self.create_feature_agent(feature_config)
                 # Skip agents that failed to create
@@ -769,13 +812,18 @@ Be careful to produce valid, working code in your resolutions.
 
                     # Initialize telemetry collector using global function
                     api_url = os.getenv("CLAUDE_NINE_API_URL", "http://localhost:8000")
+                    telemetry_output_dir = self.workspace_dir / "telemetry"
                     collector = initialize_telemetry(
                         team_id=self.team_id,
                         agent_names=agent_names,
                         api_url=api_url,
-                        check_interval=2
+                        check_interval=2,
+                        output_dir=telemetry_output_dir,
+                        headless_mode=self.headless_mode
                     )
                     logger.info(f"Started telemetry collection for team {self.team_id}")
+                    if self.headless_mode:
+                        logger.info(f"Telemetry output: {telemetry_output_dir}")
 
                     # Add initial activity logs for each agent
                     for agent_name in agent_names:
@@ -789,18 +837,54 @@ Be careful to produce valid, working code in your resolutions.
                     logger.warning(f"Failed to start telemetry: {e}")
 
 
-            # Create and run crew with parallel execution
-            # All tasks run concurrently - each agent works on its task simultaneously
-            crew = Crew(
-                agents=feature_agents,
-                tasks=feature_tasks,
-                process=Process.sequential,  # Sequential process, but tasks marked async run in parallel
-                verbose=True
-            )
+            # Create and run multiple crews in parallel (one per agent/task)
+            # This is the recommended pattern for true parallel execution in CrewAI
+            logger.info("Creating individual crews for parallel execution...")
 
-            # Run the crew
-            logger.info("Starting crew execution...")
-            result = crew.kickoff()
+            crews = []
+            for agent, task in zip(feature_agents, feature_tasks):
+                crew = Crew(
+                    agents=[agent],
+                    tasks=[task],
+                    process=Process.sequential,
+                    verbose=True
+                )
+                crews.append(crew)
+
+            logger.info(f"Created {len(crews)} crews for parallel execution")
+
+            # Run all crews in parallel using asyncio
+            import asyncio
+
+            async def run_crews_parallel(crews_list):
+                """Run all crews in parallel and collect results."""
+                tasks = [crew.kickoff_async() for crew in crews_list]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                return results
+
+            # Execute all crews in parallel
+            logger.info("Starting parallel crew execution...")
+            try:
+                # Get or create event loop
+                try:
+                    loop = asyncio.get_running_loop()
+                    import concurrent.futures
+                    future = asyncio.run_coroutine_threadsafe(run_crews_parallel(crews), loop)
+                    results = future.result()
+                except RuntimeError:
+                    # No running loop, create one
+                    results = asyncio.run(run_crews_parallel(crews))
+
+                # Check for any exceptions in results
+                for idx, result in enumerate(results):
+                    if isinstance(result, Exception):
+                        logger.error(f"Crew {idx} failed with error: {result}")
+                    else:
+                        logger.info(f"Crew {idx} completed successfully")
+
+            except Exception as e:
+                logger.error(f"Error during parallel crew execution: {e}")
+                raise
 
             logger.info("="*80)
             logger.info("All feature tasks completed")
@@ -812,9 +896,10 @@ Be careful to produce valid, working code in your resolutions.
             # Post-completion Phase 2: Merge all branches into integration branch
             merge_result = self.merge_all_branches()
 
-            # Post-completion Phase 3: Create PR if merge succeeded
+            # Post-completion Phase 3: Create PR if merge succeeded and configured
             pr_url = None
-            if merge_result["success"] and merge_result["integration_branch"]:
+            create_pr = self.config.get('create_pr', False)  # Default: off (platform-specific)
+            if create_pr and merge_result["success"] and merge_result["integration_branch"]:
                 pr_url = self.create_pull_request(
                     integration_branch=merge_result["integration_branch"],
                     merged_branches=merge_result["merged_branches"],
@@ -897,6 +982,11 @@ def main():
         default=None,
         help='Team ID for API integration (optional)'
     )
+    parser.add_argument(
+        '--headless',
+        action='store_true',
+        help='Headless mode: write telemetry to files instead of API'
+    )
 
     args = parser.parse_args()
 
@@ -927,11 +1017,41 @@ def main():
             logger.error(f"Cleanup failed: {e}")
             return 1
 
+    # Pre-run check: detect existing worktrees in workspace
+    try:
+        git_ops = GitOperations(".")
+        all_worktrees = git_ops.list_worktrees()
+        # Filter for worktrees in our workspace directory (exclude main repo)
+        workspace_abs = str(workspace.absolute())
+        existing_worktrees = [w for w in all_worktrees if workspace_abs in w.get('path', '')]
+
+        if existing_worktrees:
+            logger.warning(f"Found {len(existing_worktrees)} existing worktree(s) in workspace")
+            if args.headless:
+                logger.info("Headless mode: auto-cleaning existing worktrees")
+                git_ops.cleanup_all_worktrees(str(workspace))
+            else:
+                print(f"\n⚠️  Existing worktrees detected ({len(existing_worktrees)} found):")
+                for wt in existing_worktrees:
+                    print(f"   - {wt.get('path', 'unknown')} ({wt.get('branch', 'no branch')})")
+                response = input("\nClean up before starting? [y/N]: ").strip().lower()
+                if response == 'y':
+                    logger.info("User requested cleanup")
+                    git_ops.cleanup_all_worktrees(str(workspace))
+                    logger.info("Cleanup complete")
+                else:
+                    logger.error("Cannot start with existing worktrees. Run with --cleanup-only first.")
+                    return 1
+    except Exception as e:
+        logger.warning(f"Pre-run worktree check failed: {e}")
+        # Continue anyway - this is a safety check, not critical
+
     # Create and run orchestrator
     orchestrator = MultiAgentOrchestrator(
         config_path=args.config,
         tasks_path=args.tasks,
-        team_id=args.team_id
+        team_id=args.team_id,
+        headless_mode=args.headless
     )
     orchestrator.setup_signal_handlers()
 

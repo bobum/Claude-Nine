@@ -9,7 +9,7 @@ multiple agents to work in parallel on different branches without conflicts.
 import os
 import shutil
 import logging
-from typing import List, Tuple, Optional, Dict
+from typing import List, Tuple, Optional, Dict, Any
 from pathlib import Path
 from datetime import datetime
 import git
@@ -312,7 +312,7 @@ class GitOperations:
             self.repo.git.add(A=True)
 
             # Commit
-            commit = self.repo.index.commit(message)
+            commit = self.repo.git.commit(m=message)
             logger.info(f"Committed changes: {commit.hexsha[:7]} - {message}")
 
             return True
@@ -868,7 +868,7 @@ class GitOperations:
             f.write(resolved_content)
 
         # Stage the file
-        self.repo.index.add([file_path])
+        self.repo.git.add(file_path)
         logger.info(f"Resolved and staged: {file_path}")
 
     def complete_merge(self, message: str) -> bool:
@@ -890,7 +890,7 @@ class GitOperations:
                     return False
 
             # Commit the merge
-            self.repo.index.commit(message)
+            self.repo.git.commit(m=message)
             logger.info(f"Merge completed with message: {message}")
             return True
 
