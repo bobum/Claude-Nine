@@ -13,7 +13,7 @@ source activate.sh
 ./start.sh
 ```
 
-This automatically activates the venv, starts both the API server and dashboard. Open http://localhost:3000 in your browser.
+This automatically activates the venv, starts both the API server and dashboard. Open http://localhost:3001 in your browser.
 
 ### Stop Claude-Nine
 ```bash
@@ -24,7 +24,7 @@ Or press `Ctrl+C` in the terminal where you ran `./start.sh`.
 
 ## What's Running?
 
-- **Dashboard**: http://localhost:3000 - Your main UI
+- **Dashboard**: http://localhost:3001 - Your main UI
 - **API**: http://localhost:8000 - Backend server
 - **API Docs**: http://localhost:8000/docs - Interactive API documentation
 
@@ -50,7 +50,7 @@ deactivate
 
 ## First Steps
 
-1. **Visit the Dashboard**: http://localhost:3000
+1. **Visit the Dashboard**: http://localhost:3001
 2. **Follow the Tutorial**: An interactive tour will guide you through features
 3. **Create Your First Team**:
    - Click "View Teams" → "+ New Team"
@@ -80,14 +80,14 @@ Your data is stored in `api/claude_nine.db` (SQLite file).
 ## Troubleshooting
 
 ### Port Already in Use
-If port 8000 or 3000 is already taken:
+If port 8000 or 3001 is already taken:
 ```bash
 # Kill existing process
 ./stop.sh
 
 # Or manually:
 lsof -ti:8000 | xargs kill -9
-lsof -ti:3000 | xargs kill -9
+lsof -ti:3001 | xargs kill -9
 ```
 
 ### API Not Starting

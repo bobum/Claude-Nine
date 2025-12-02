@@ -187,6 +187,7 @@ class RunBase(BaseModel):
 class RunCreate(RunBase):
     team_id: UUID4
     selected_work_item_ids: List[UUID4] = []
+    dry_run: bool = True  # Default to dry-run mode (no API credits consumed)
 
 
 class RunTaskBase(BaseModel):

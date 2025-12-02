@@ -21,10 +21,11 @@ from sqlalchemy.orm import Session
 import asyncio
 
 
-from ..models import Team, WorkItem
+from ..models import Team, WorkItem, Run
 from ..database import SessionLocal
 from ..websocket import notify_work_item_update, notify_team_update
 from ..config import settings
+from .telemetry_service import get_telemetry_service
 
 logger = logging.getLogger(__name__)
 
@@ -60,13 +61,14 @@ class OrchestratorService:
 
         return orchestrator_script
 
-    def start_team(self, team_id: UUID, db: Session) -> dict:
+    def start_team(self, team_id: UUID, db: Session, dry_run: bool = False) -> dict:
         """
         Start orchestrator for a team
 
         Args:
             team_id: UUID of the team to start
             db: Database session
+            dry_run: If True, use mock LLM responses (no API credits consumed)
 
         Returns:
             dict with status information
@@ -138,7 +140,13 @@ class OrchestratorService:
             '--config', str(config_file_path),
             '--tasks', str(tasks_file_path),
             '--team-id', team_id_str  # Pass team ID so orchestrator can report back
+            # Note: NOT using --headless so telemetry goes to website via API
         ]
+        
+        # Add dry-run flag if requested (uses mock LLM, no API credits)
+        if dry_run:
+            cmd.append('--dry-run')
+            logger.info(f"DRY RUN MODE: Orchestrator will use mock LLM responses")
 
         # Set environment variables
         env = os.environ.copy()
@@ -171,6 +179,25 @@ class OrchestratorService:
                     'started_at': datetime.utcnow(),
                     'work_items': [str(wi.id) for wi in work_items]
                 }
+
+            # Start telemetry monitoring for this orchestrator process
+            # Note: This may fail if no event loop is running, but we don't want to fail the entire operation
+            try:
+                telemetry_service = get_telemetry_service()
+                telemetry_service.start_monitoring(team_id_str, team_id_str, process.pid)
+                logger.info(f"Started telemetry monitoring for team {team_id_str} (PID: {process.pid})")
+            except Exception as e:
+                logger.warning(f"Could not start telemetry monitoring (non-fatal): {e}")
+
+            # Update Run record to 'running' if one exists
+            active_run = db.query(Run).filter(
+                Run.team_id == team_id,
+                Run.status == "pending"
+            ).first()
+            if active_run:
+                active_run.status = "running"
+                active_run.started_at = datetime.utcnow()
+                logger.info(f"Updated Run {active_run.id} status to 'running'")
 
             # Start a background thread to monitor the process
             monitor_thread = threading.Thread(
@@ -234,6 +261,10 @@ class OrchestratorService:
 
             orch_info = self.running_orchestrators[team_id_str]
             process = orch_info['process']
+
+            # Stop telemetry monitoring
+            telemetry_service = get_telemetry_service()
+            telemetry_service.stop_monitoring(team_id_str)
 
             # Terminate the process
             process.terminate()
@@ -315,6 +346,20 @@ class OrchestratorService:
             team = db.query(Team).filter(Team.id == UUID(team_id_str)).first()
             if team:
                 team.status = "stopped"
+
+                # Update Run record
+                active_run = db.query(Run).filter(
+                    Run.team_id == UUID(team_id_str),
+                    Run.status == "running"
+                ).first()
+                if active_run:
+                    if process.returncode == 0:
+                        active_run.status = "completed"
+                    else:
+                        active_run.status = "failed"
+                        active_run.error_message = stderr[:500] if stderr else "Orchestrator failed"
+                    active_run.completed_at = datetime.utcnow()
+                    logger.info(f"Updated Run {active_run.id} status to '{active_run.status}'")
 
                 # Update work items based on process result
                 if process.returncode == 0:

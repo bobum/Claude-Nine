@@ -17,8 +17,9 @@ from ..schemas import (
     RunStatus,
     RunTaskStatus,
 )
+from ..services.orchestrator_service import get_orchestrator_service
 
-router = APIRouter(prefix="/runs", tags=["runs"])
+router = APIRouter(tags=["runs"])
 
 
 @router.get("/", response_model=List[RunSchema])
@@ -69,6 +70,15 @@ def create_run(run_data: RunCreate, db: Session = Depends(get_db)):
 
     db.commit()
     db.refresh(run)
+
+    # Start the orchestrator for this run
+    try:
+        orchestrator_service = get_orchestrator_service()
+        orchestrator_service.start_team(run_data.team_id, db, dry_run=run_data.dry_run)
+    except Exception as e:
+        # Log but don't fail - run is created, orchestrator can be started manually
+        import logging
+        logging.getLogger(__name__).error(f"Failed to start orchestrator: {e}")
     return run
 
 
