@@ -331,6 +331,7 @@ export async function createRun(data: {
   team_id: string;
   session_id: string;
   selected_work_item_ids: string[];
+  dry_run?: boolean;
 }): Promise<Run> {
   const response = await fetch(`${API_BASE_URL}/api/runs/`, {
     method: "POST",

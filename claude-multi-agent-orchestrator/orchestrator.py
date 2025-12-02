@@ -46,6 +46,61 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+class MockLLM:
+    """
+    Mock LLM for dry-run mode.
+    
+    Simulates LLM responses without making actual API calls.
+    Useful for testing the orchestrator workflow without consuming credits.
+    """
+    
+    def __init__(self, model: str = "mock", api_key: str = None, max_tokens: int = 4096, **kwargs):
+        self.model = model
+        self.max_tokens = max_tokens
+        self._call_count = 0
+        logger.info(f"MockLLM initialized (model={model}, max_tokens={max_tokens})")
+    
+    def call(self, messages, **kwargs):
+        """Simulate LLM call with canned responses."""
+        self._call_count += 1
+        
+        # Extract the last user message to understand context
+        last_message = ""
+        if messages:
+            for msg in reversed(messages):
+                if isinstance(msg, dict) and msg.get("role") == "user":
+                    last_message = msg.get("content", "")[:200]
+                    break
+        
+        # Simulate thinking delay
+        import time
+        time.sleep(0.5)
+        
+        logger.info(f"MockLLM call #{self._call_count}: {last_message[:50]}...")
+        
+        # Return a generic task completion response
+        return f"""I have analyzed the task and here is my simulated response (dry-run mode, call #{self._call_count}).
+
+For this feature implementation task, I would:
+1. Create the necessary files and directories
+2. Implement the core functionality
+3. Add appropriate error handling
+4. Write tests for the new code
+5. Commit the changes with a descriptive message
+
+[DRY-RUN] This is a simulated response. No actual code changes were made.
+[DRY-RUN] In a real run, I would interact with the git tools to make commits.
+
+Final Answer: Task completed successfully (simulated in dry-run mode).
+"""
+    
+    def __call__(self, messages, **kwargs):
+        """Allow the mock to be called directly."""
+        return self.call(messages, **kwargs)
+
+
+
+
 class MultiAgentOrchestrator:
     """
     Orchestrates multiple Claude agents working on different features in parallel.
@@ -57,7 +112,7 @@ class MultiAgentOrchestrator:
     - Automatic cleanup of worktrees on shutdown
     """
 
-    def __init__(self, config_path: str = "config.yaml", tasks_path: str = "tasks/example_tasks.yaml", team_id: str = None, headless_mode: bool = False):
+    def __init__(self, config_path: str = "config.yaml", tasks_path: str = "tasks/example_tasks.yaml", team_id: str = None, headless_mode: bool = False, dry_run: bool = False):
         """
         Initialize the orchestrator.
 
@@ -66,7 +121,11 @@ class MultiAgentOrchestrator:
             tasks_path: Path to tasks definition file
             team_id: Team ID for API integration (optional)
             headless_mode: If True, write telemetry to files instead of API
+            dry_run: If True, use mock LLM responses instead of real API calls
         """
+        self.dry_run = dry_run
+        if dry_run:
+            logger.info("DRY RUN MODE: Using mock LLM responses (no API credits consumed)")
         self.config = self._load_config(config_path)
         self.tasks_config = self._load_tasks(tasks_path)
         self.repo_path = os.getcwd()
@@ -169,24 +228,35 @@ class MultiAgentOrchestrator:
 
     def _load_tasks(self, tasks_path: str) -> List[Dict[str, Any]]:
         """Load tasks from YAML file. Returns empty list on error to keep orchestrator alive."""
+        # Debug logging - goes to orchestrator.log
+        logger.info(f"[_load_tasks] Loading tasks from: {tasks_path}")
+        logger.info(f"[_load_tasks] File exists: {os.path.exists(tasks_path)}")
+
         try:
             with open(tasks_path, 'r', encoding='utf-8') as f:
-                tasks_data = yaml.safe_load(f)
+                raw_content = f.read()
+            logger.info(f"[_load_tasks] File content length: {len(raw_content)} chars")
+            logger.info(f"[_load_tasks] First 500 chars: {raw_content[:500]}")
 
-            if 'features' in tasks_data:
+            tasks_data = yaml.safe_load(raw_content)
+            logger.info(f"[_load_tasks] Parsed YAML type: {type(tasks_data)}")
+            if tasks_data:
+                logger.info(f"[_load_tasks] Parsed YAML keys: {list(tasks_data.keys()) if isinstance(tasks_data, dict) else 'not a dict'}")
+
+            if tasks_data and isinstance(tasks_data, dict) and 'features' in tasks_data:
                 tasks = tasks_data['features']
+                logger.info(f"[_load_tasks] Found 'features' key with {len(tasks) if tasks else 0} items")
             else:
-                tasks = tasks_data
+                tasks = tasks_data if tasks_data else []
+                logger.info(f"[_load_tasks] No 'features' key, using raw data: {type(tasks)}")
 
-            logger.info(f"Loaded {len(tasks)} tasks from {tasks_path}")
-            return tasks
+            logger.info(f"[_load_tasks] Returning {len(tasks) if isinstance(tasks, list) else 0} tasks")
+            return tasks if isinstance(tasks, list) else []
         except FileNotFoundError:
             logger.error(f"[RESILIENT] Tasks file {tasks_path} not found - orchestrator will wait for tasks")
-            # Return empty list instead of crashing - orchestrator stays alive
             return []
         except Exception as e:
             logger.error(f"[RESILIENT] Error loading tasks: {e} - orchestrator will continue with empty task list", exc_info=True)
-            # Return empty list instead of crashing - orchestrator stays alive
             return []
 
     def create_feature_agent(self, feature_config: Dict[str, Any]) -> Tuple[Agent, str]:
@@ -244,12 +314,18 @@ happen in your own workspace: {worktree_abs_path}
 Always make commits with descriptive messages. Work independently and focus on your feature.
 """
 
-            # Create LLM with explicit API key
-            llm = LLM(
-                model="anthropic/claude-sonnet-4-5-20250929",
-                api_key=os.getenv("ANTHROPIC_API_KEY"),
-                max_tokens=4096
-            )
+            # Create LLM with explicit API key (or MockLLM for dry-run)
+            if self.dry_run:
+                llm = MockLLM(
+                    model="anthropic/claude-sonnet-4-5-20250929",
+                    max_tokens=4096
+                )
+            else:
+                llm = LLM(
+                    model="anthropic/claude-sonnet-4-5-20250929",
+                    api_key=os.getenv("ANTHROPIC_API_KEY"),
+                    max_tokens=4096
+                )
 
             agent = Agent(
                 role=agent_role,
@@ -415,11 +491,18 @@ Guidelines for resolution:
 - Ensure the result is syntactically valid code
 """
 
-        llm = LLM(
-            model="anthropic/claude-sonnet-4-5-20250929",
-            api_key=os.getenv("ANTHROPIC_API_KEY"),
-            max_tokens=8192  # Larger for code resolution
-        )
+        # Use MockLLM for dry-run mode
+        if self.dry_run:
+            llm = MockLLM(
+                model="anthropic/claude-sonnet-4-5-20250929",
+                max_tokens=8192
+            )
+        else:
+            llm = LLM(
+                model="anthropic/claude-sonnet-4-5-20250929",
+                api_key=os.getenv("ANTHROPIC_API_KEY"),
+                max_tokens=8192  # Larger for code resolution
+            )
 
         agent = Agent(
             role="Merge Conflict Resolver",
@@ -987,6 +1070,11 @@ def main():
         action='store_true',
         help='Headless mode: write telemetry to files instead of API'
     )
+    parser.add_argument(
+        '--dry-run',
+        action='store_true',
+        help='Dry run mode: use mock LLM responses instead of real API calls (saves credits)'
+    )
 
     args = parser.parse_args()
 
@@ -1051,7 +1139,8 @@ def main():
         config_path=args.config,
         tasks_path=args.tasks,
         team_id=args.team_id,
-        headless_mode=args.headless
+        headless_mode=args.headless,
+        dry_run=args.dry_run
     )
     orchestrator.setup_signal_handlers()
 

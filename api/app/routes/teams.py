@@ -172,16 +172,33 @@ def delete_team(
     return None
 
 
+from pydantic import BaseModel
+from typing import Optional
+
+class StartTeamRequest(BaseModel):
+    dry_run: bool = False
+
+
 @router.post("/{team_id}/start")
 async def start_team(
     team_id: UUID,
+    request: Optional[StartTeamRequest] = None,
     db: Session = Depends(get_db)
 ):
-    """Start a team (TEST MODE: sends mock telemetry instead of running orchestrator)"""
+    """Start a team orchestrator.
+    
+    Args:
+        team_id: UUID of the team to start
+        request: Optional request body with:
+            - dry_run: If True, use mock LLM responses (no API credits consumed)
+    """
     from datetime import datetime
     from ..websocket import notify_agent_telemetry
     import asyncio
     import random
+    
+    # Extract dry_run flag from request body (default False)
+    dry_run = request.dry_run if request else False
     
     db_team = db.query(Team).filter(Team.id == team_id).first()
     if not db_team:
@@ -222,7 +239,7 @@ async def start_team(
     # Start the real orchestrator
     from ..services.orchestrator_service import get_orchestrator_service
     orch_service = get_orchestrator_service()
-    result = orch_service.start_team(team_id, db)
+    result = orch_service.start_team(team_id, db, dry_run=dry_run)
 
     return {
         "message": "Team started successfully",
