@@ -52,16 +52,114 @@ class MockLLM:
     
     Simulates LLM responses without making actual API calls.
     Useful for testing the orchestrator workflow without consuming credits.
+    
+    Enhanced for realistic UI testing:
+    - Simulates realistic delays (5-10 seconds per "LLM call")
+    - Generates fake telemetry (CPU, memory, token usage)
+    - Updates task status via API
     """
     
-    def __init__(self, model: str = "mock", api_key: str = None, max_tokens: int = 4096, **kwargs):
+    # Class-level tracking for all mock instances
+    _instances: Dict[str, 'MockLLM'] = {}
+    
+    def __init__(self, model: str = "mock", api_key: str = None, max_tokens: int = 4096, 
+                 agent_name: str = None, work_item_id: str = None, team_id: str = None, **kwargs):
         self.model = model
         self.max_tokens = max_tokens
         self._call_count = 0
-        logger.info(f"MockLLM initialized (model={model}, max_tokens={max_tokens})")
+        self.agent_name = agent_name
+        self.work_item_id = work_item_id
+        self.team_id = team_id
+        self.api_url = os.getenv("CLAUDE_NINE_API_URL", "http://localhost:8000")
+        
+        # Token tracking for this agent
+        self._total_input_tokens = 0
+        self._total_output_tokens = 0
+        
+        # Register this instance
+        if agent_name:
+            MockLLM._instances[agent_name] = self
+        
+        logger.info(f"MockLLM initialized (model={model}, agent={agent_name}, work_item={work_item_id})")
+    
+    def _update_task_status(self, status: str):
+        """Update task status via API."""
+        if not self.work_item_id:
+            return
+        try:
+            response = requests.patch(
+                f"{self.api_url}/api/runs/tasks/by-work-item/{self.work_item_id}",
+                params={
+                    "status": status,
+                    "agent_name": self.agent_name
+                },
+                timeout=5
+            )
+            if response.status_code == 200:
+                logger.info(f"[DRY-RUN] Updated task status to '{status}' for work_item {self.work_item_id}")
+            else:
+                logger.warning(f"[DRY-RUN] Failed to update task status: {response.status_code}")
+        except Exception as e:
+            logger.warning(f"[DRY-RUN] Could not update task status: {e}")
+    
+    def _send_telemetry(self):
+        """Send fake telemetry data to the API."""
+        if not self.agent_name or not self.team_id:
+            return
+        
+        import random
+        
+        # Generate realistic-looking metrics
+        cpu_percent = random.uniform(15.0, 45.0)
+        memory_mb = random.uniform(200.0, 500.0)
+        
+        telemetry_data = {
+            "team_id": self.team_id,
+            "agent_name": self.agent_name,
+            "process_metrics": {
+                "pid": os.getpid(),
+                "cpu_percent": round(cpu_percent, 1),
+                "memory_mb": round(memory_mb, 1),
+                "threads": 4,
+                "status": "running"
+            },
+            "token_usage": {
+                "model": "claude-sonnet-4-5",
+                "input_tokens": self._total_input_tokens,
+                "output_tokens": self._total_output_tokens,
+                "total_tokens": self._total_input_tokens + self._total_output_tokens,
+                "cost_usd": round((self._total_input_tokens * 3.0 + self._total_output_tokens * 15.0) / 1_000_000, 4)
+            },
+            "git_activities": [],
+            "activity_logs": [
+                {
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "level": "info",
+                    "message": f"Processing task (call #{self._call_count})",
+                    "source": "mock_llm",
+                    "agent_name": self.agent_name
+                }
+            ],
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+        try:
+            response = requests.post(
+                f"{self.api_url}/api/telemetry/agent/{self.agent_name}",
+                json=telemetry_data,
+                timeout=5
+            )
+            if response.status_code == 200:
+                logger.debug(f"[DRY-RUN] Sent telemetry for {self.agent_name}")
+            else:
+                logger.warning(f"[DRY-RUN] Failed to send telemetry: {response.status_code}")
+        except Exception as e:
+            logger.warning(f"[DRY-RUN] Could not send telemetry: {e}")
     
     def call(self, messages, **kwargs):
-        """Simulate LLM call with canned responses."""
+        """Simulate LLM call with realistic delays and telemetry."""
+        import random
+        
         self._call_count += 1
         
         # Extract the last user message to understand context
@@ -72,11 +170,35 @@ class MockLLM:
                     last_message = msg.get("content", "")[:200]
                     break
         
-        # Simulate thinking delay
-        import time
-        time.sleep(0.5)
+        logger.info(f"[DRY-RUN] MockLLM call #{self._call_count} for {self.agent_name}: {last_message[:50]}...")
         
-        logger.info(f"MockLLM call #{self._call_count}: {last_message[:50]}...")
+        # First call: transition to "running" status with 1-3s pending delay
+        if self._call_count == 1:
+            pending_delay = random.uniform(1.0, 3.0)
+            logger.info(f"[DRY-RUN] Simulating pending state for {pending_delay:.1f}s")
+            time.sleep(pending_delay)
+            self._update_task_status("running")
+        
+        # Simulate work with 5-10 second delay, sending telemetry periodically
+        work_duration = random.uniform(5.0, 10.0)
+        logger.info(f"[DRY-RUN] Simulating work for {work_duration:.1f}s")
+        
+        elapsed = 0.0
+        telemetry_interval = 2.0  # Send telemetry every 2 seconds
+        
+        while elapsed < work_duration:
+            sleep_time = min(telemetry_interval, work_duration - elapsed)
+            time.sleep(sleep_time)
+            elapsed += sleep_time
+            
+            # Simulate token accumulation
+            self._total_input_tokens += random.randint(500, 1500)
+            self._total_output_tokens += random.randint(200, 800)
+            
+            # Send telemetry update
+            self._send_telemetry()
+        
+        logger.info(f"[DRY-RUN] MockLLM call #{self._call_count} completed")
         
         # Return a generic task completion response
         return f"""I have analyzed the task and here is my simulated response (dry-run mode, call #{self._call_count}).
@@ -89,7 +211,7 @@ For this feature implementation task, I would:
 5. Commit the changes with a descriptive message
 
 [DRY-RUN] This is a simulated response. No actual code changes were made.
-[DRY-RUN] In a real run, I would interact with the git tools to make commits.
+[DRY-RUN] Tokens used: {self._total_input_tokens} input, {self._total_output_tokens} output
 
 Final Answer: Task completed successfully (simulated in dry-run mode).
 """
@@ -318,7 +440,10 @@ Always make commits with descriptive messages. Work independently and focus on y
             if self.dry_run:
                 llm = MockLLM(
                     model="anthropic/claude-sonnet-4-5-20250929",
-                    max_tokens=4096
+                    max_tokens=4096,
+                    agent_name=agent_name,
+                    work_item_id=feature_config.get('work_item_id'),
+                    team_id=self.team_id
                 )
             else:
                 llm = LLM(
@@ -495,7 +620,9 @@ Guidelines for resolution:
         if self.dry_run:
             llm = MockLLM(
                 model="anthropic/claude-sonnet-4-5-20250929",
-                max_tokens=8192
+                max_tokens=8192,
+                agent_name="resolver",
+                team_id=self.team_id
             )
         else:
             llm = LLM(
