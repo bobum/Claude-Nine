@@ -17,6 +17,8 @@ export default function AgentTelemetryCard({
         return "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200";
       case "idle":
         return "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200";
+      case "completed":
+        return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200";
       case "blocked":
       case "error":
         return "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200";
@@ -34,6 +36,26 @@ export default function AgentTelemetryCard({
       default:
         return "text-gray-600 dark:text-gray-400";
     }
+  };
+
+  // Calculate display tokens (include streaming if available)
+  const getDisplayTokens = () => {
+    if (!telemetry?.token_usage) return 0;
+    const { total_tokens, streaming_tokens, total_tokens_with_streaming } = telemetry.token_usage;
+    return total_tokens_with_streaming || (total_tokens + (streaming_tokens || 0));
+  };
+
+  // Check if actively streaming tokens
+  const isStreaming = telemetry?.token_usage?.streaming_tokens && telemetry.token_usage.streaming_tokens > 0;
+
+  // Calculate cost from tokens (Claude Sonnet 4.5 pricing)
+  const calculateCost = () => {
+    if (!telemetry?.token_usage) return 0;
+    const { input_tokens, output_tokens } = telemetry.token_usage;
+    const COST_PER_1M_INPUT = 3.00;
+    const COST_PER_1M_OUTPUT = 15.00;
+    return (input_tokens / 1_000_000) * COST_PER_1M_INPUT + 
+           (output_tokens / 1_000_000) * COST_PER_1M_OUTPUT;
   };
 
   return (
@@ -62,18 +84,35 @@ export default function AgentTelemetryCard({
           {telemetry && (
             <div className="flex items-center gap-1 px-2 py-1 bg-green-100 dark:bg-green-900 rounded-full">
               <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-              <span className="text-xs font-medium text-green-700 dark:text-green-300">LIVE</span>
+              <span className="text-xs font-medium text-green-700 dark:text-green-300">
+                {telemetry.event_bus_connected ? "LIVE" : "POLLING"}
+              </span>
             </div>
           )}
           <span
             className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(
-              agent.status
+              telemetry?.status || agent.status
             )}`}
           >
-            {agent.status}
+            {telemetry?.status || agent.status}
           </span>
         </div>
       </div>
+
+      {/* Current Action */}
+      {telemetry?.current_action && (
+        <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/30 rounded-lg">
+          <p className="text-sm text-blue-800 dark:text-blue-200">
+            <span className="font-medium">Current: </span>
+            {telemetry.current_action}
+          </p>
+          {telemetry.tool_in_progress && (
+            <p className="text-xs text-blue-600 dark:text-blue-300 mt-1">
+              🔧 Tool in progress: {telemetry.tool_in_progress}
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Process Metrics */}
       {telemetry && telemetry.process_metrics && (
@@ -104,13 +143,13 @@ export default function AgentTelemetryCard({
 
           <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-3">
             <div className="flex items-center gap-2">
-              <span className="text-2xl">🪙</span>
+              <span className="text-2xl">{isStreaming ? "⚡" : "🪙"}</span>
               <div>
                 <p className="text-xs text-gray-500 dark:text-gray-400">
-                  Tokens
+                  Tokens {isStreaming && <span className="text-yellow-500">(streaming)</span>}
                 </p>
-                <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                  {telemetry.token_usage.total_tokens.toLocaleString()}
+                <p className={`text-lg font-semibold text-gray-900 dark:text-gray-100 ${isStreaming ? "animate-pulse" : ""}`}>
+                  {getDisplayTokens().toLocaleString()}
                 </p>
               </div>
             </div>
@@ -122,11 +161,24 @@ export default function AgentTelemetryCard({
               <div>
                 <p className="text-xs text-gray-500 dark:text-gray-400">Cost</p>
                 <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                  ${telemetry.token_usage.cost_usd.toFixed(4)}
+                  ${calculateCost().toFixed(4)}
                 </p>
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Token Breakdown */}
+      {telemetry?.token_usage && (telemetry.token_usage.input_tokens > 0 || telemetry.token_usage.output_tokens > 0) && (
+        <div className="mb-4 text-xs text-gray-500 dark:text-gray-400 flex gap-4">
+          <span>In: {telemetry.token_usage.input_tokens.toLocaleString()}</span>
+          <span>Out: {telemetry.token_usage.output_tokens.toLocaleString()}</span>
+          {isStreaming && (
+            <span className="text-yellow-600 dark:text-yellow-400">
+              +{telemetry.token_usage.streaming_tokens?.toLocaleString()} streaming
+            </span>
+          )}
         </div>
       )}
 

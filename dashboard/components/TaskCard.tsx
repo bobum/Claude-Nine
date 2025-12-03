@@ -142,7 +142,7 @@ export default function TaskCard({ task, telemetry }: TaskCardProps) {
               <div>
                 <p className="text-xs text-gray-500 dark:text-gray-400">Cost</p>
                 <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                  ${telemetry.token_usage.cost_usd.toFixed(4)}
+                  ${((telemetry.token_usage.input_tokens / 1_000_000 * 3.00) + (telemetry.token_usage.output_tokens / 1_000_000 * 15.00)).toFixed(4)}
                 </p>
               </div>
             </div>

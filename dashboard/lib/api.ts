@@ -257,7 +257,9 @@ export interface TokenUsage {
   input_tokens: number;
   output_tokens: number;
   total_tokens: number;
-  cost_usd: number;
+  // Live streaming tokens (estimated, not yet finalized)
+  streaming_tokens?: number | null;
+  total_tokens_with_streaming?: number | null;
 }
 
 export interface ActivityLog {
@@ -268,13 +270,29 @@ export interface ActivityLog {
   agent_name?: string | null;
 }
 
+export interface ToolCall {
+  timestamp: string;
+  tool: string;
+  arguments?: Record<string, unknown> | null;
+  result?: string | null;
+}
+
 export interface AgentTelemetry {
   agent_name: string;
+  status?: string;
+  current_task?: string;
+  current_action?: string;
   process_metrics: ProcessMetrics;
   token_usage: TokenUsage;
   git_activities: GitActivity[];
   activity_logs: ActivityLog[];
+  files_read?: string[];
+  files_written?: string[];
+  tool_calls?: ToolCall[];
+  tool_in_progress?: string | null;
   timestamp: string;
+  heartbeat?: boolean;
+  event_bus_connected?: boolean;
 }
 
 // Run Types (orchestrator session tracking)

@@ -6,9 +6,17 @@ and report telemetry data about the running CrewAI agents back to the Claude-Nin
 
 It collects:
 - Process metrics (CPU, memory, threads)
-- Token usage by intercepting Anthropic API calls
+- Token usage via CrewAI event bus (LLMStreamChunkEvent for live streaming)
 - Git activities by parsing CrewAI logs
 - Agent-specific activity by parsing CrewAI's agent outputs
+- Task/Agent lifecycle events from CrewAI event bus
+
+CrewAI Event Bus Integration:
+- LLMStreamChunkEvent: Live token streaming as they're generated
+- LLMCallStartedEvent/LLMCallCompletedEvent: LLM call lifecycle
+- AgentExecutionStartedEvent/AgentExecutionCompletedEvent: Agent lifecycle
+- TaskStartedEvent/TaskCompletedEvent: Task lifecycle
+- ToolUsageStartedEvent/ToolUsageFinishedEvent: Tool usage tracking
 """
 
 import os
@@ -20,9 +28,9 @@ import logging
 import re
 import httpx
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Callable
 from datetime import datetime, UTC
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from collections import defaultdict
 
 logger = logging.getLogger(__name__)
@@ -183,21 +191,419 @@ class TelemetryCollector:
         # Telemetry event log (for file output)
         self.telemetry_events: List[Dict[str, Any]] = []
 
+        # CrewAI event bus subscription state
+        self._event_bus_connected = False
+        self._event_handlers: List[Callable] = []
+
+        # Live streaming token tracking (updated per-chunk from event bus)
+        self.agent_live_tokens: Dict[str, int] = {name: 0 for name in agent_names}
+        self.agent_current_llm_call: Dict[str, Dict[str, Any]] = {}
+
+        # Additional event-driven tracking
+        self.agent_tool_in_progress: Dict[str, Optional[str]] = {name: None for name in agent_names}
+        self.agent_task_description: Dict[str, str] = {name: "" for name in agent_names}
+
         logger.info(f"Initialized telemetry collector for team {team_id}")
         logger.info(f"Tracking {len(agent_names)} agents: {', '.join(agent_names)}")
         if headless_mode:
             logger.info("Running in headless mode - telemetry will be written to files")
 
     def start(self):
-        """Start the telemetry collection thread."""
+        """Start the telemetry collection thread and connect to CrewAI event bus."""
         if self.running:
             logger.warning("Telemetry collector already running")
             return
 
         self.running = True
+        
+        # Connect to CrewAI event bus for live token streaming
+        self._connect_to_event_bus()
+        
         self.thread = threading.Thread(target=self._collection_loop, daemon=True)
         self.thread.start()
         logger.info("Telemetry collector started")
+
+    def _connect_to_event_bus(self):
+        """
+        Connect to the CrewAI event bus for live event streaming.
+        
+        Subscribes to:
+        - LLMStreamChunkEvent: Live token streaming as they're generated
+        - LLMCallStartedEvent/LLMCallCompletedEvent: LLM call lifecycle with token counts
+        - AgentExecutionStartedEvent/AgentExecutionCompletedEvent: Agent lifecycle
+        - TaskStartedEvent/TaskCompletedEvent: Task lifecycle
+        - ToolUsageStartedEvent/ToolUsageFinishedEvent: Tool usage tracking
+        """
+        try:
+            # Import CrewAI event bus and event types
+            from crewai.utilities.events import crewai_event_bus
+            
+            # Try to import event types - these may vary by CrewAI version
+            try:
+                from crewai.utilities.events.events import (
+                    LLMStreamChunkEvent,
+                    LLMCallStartedEvent,
+                    LLMCallCompletedEvent,
+                    AgentExecutionStartedEvent,
+                    AgentExecutionCompletedEvent,
+                    TaskStartedEvent,
+                    TaskCompletedEvent,
+                    ToolUsageStartedEvent,
+                    ToolUsageFinishedEvent,
+                )
+                self._has_stream_events = True
+            except ImportError:
+                # Fallback - some events may not be available in all versions
+                logger.warning("Some CrewAI event types not available - using basic events")
+                self._has_stream_events = False
+                try:
+                    from crewai.utilities.events.events import (
+                        LLMCallStartedEvent,
+                        LLMCallCompletedEvent,
+                    )
+                except ImportError:
+                    logger.warning("LLM events not available in this CrewAI version")
+                    return
+
+            # Register event handlers
+            def on_llm_stream_chunk(source, event):
+                """Handle live token streaming - called for each token/chunk."""
+                self._handle_llm_stream_chunk(event)
+            
+            def on_llm_call_started(source, event):
+                """Handle LLM call start."""
+                self._handle_llm_call_started(event)
+            
+            def on_llm_call_completed(source, event):
+                """Handle LLM call completion with final token counts."""
+                self._handle_llm_call_completed(event)
+            
+            def on_agent_execution_started(source, event):
+                """Handle agent execution start."""
+                self._handle_agent_execution_started(event)
+            
+            def on_agent_execution_completed(source, event):
+                """Handle agent execution completion."""
+                self._handle_agent_execution_completed(event)
+            
+            def on_task_started(source, event):
+                """Handle task start."""
+                self._handle_task_started(event)
+            
+            def on_task_completed(source, event):
+                """Handle task completion."""
+                self._handle_task_completed(event)
+            
+            def on_tool_usage_started(source, event):
+                """Handle tool usage start."""
+                self._handle_tool_usage_started(event)
+            
+            def on_tool_usage_finished(source, event):
+                """Handle tool usage completion."""
+                self._handle_tool_usage_finished(event)
+
+            # Subscribe to events
+            if self._has_stream_events:
+                crewai_event_bus.on(LLMStreamChunkEvent, on_llm_stream_chunk)
+                crewai_event_bus.on(LLMCallStartedEvent, on_llm_call_started)
+                crewai_event_bus.on(LLMCallCompletedEvent, on_llm_call_completed)
+                crewai_event_bus.on(AgentExecutionStartedEvent, on_agent_execution_started)
+                crewai_event_bus.on(AgentExecutionCompletedEvent, on_agent_execution_completed)
+                crewai_event_bus.on(TaskStartedEvent, on_task_started)
+                crewai_event_bus.on(TaskCompletedEvent, on_task_completed)
+                crewai_event_bus.on(ToolUsageStartedEvent, on_tool_usage_started)
+                crewai_event_bus.on(ToolUsageFinishedEvent, on_tool_usage_finished)
+                
+                logger.info("Connected to CrewAI event bus with full event support")
+            else:
+                crewai_event_bus.on(LLMCallStartedEvent, on_llm_call_started)
+                crewai_event_bus.on(LLMCallCompletedEvent, on_llm_call_completed)
+                logger.info("Connected to CrewAI event bus with basic LLM events")
+
+            self._event_bus_connected = True
+            
+        except ImportError as e:
+            logger.warning(f"CrewAI event bus not available: {e}")
+            logger.info("Falling back to log-based telemetry collection")
+            self._event_bus_connected = False
+        except Exception as e:
+            logger.error(f"Failed to connect to CrewAI event bus: {e}")
+            self._event_bus_connected = False
+
+    def _handle_llm_stream_chunk(self, event):
+        """
+        Handle live token streaming from LLMStreamChunkEvent.
+        
+        This is called for each token/chunk as it's generated by the LLM,
+        allowing real-time token counting before the call completes.
+        """
+        try:
+            chunk = getattr(event, 'chunk', None) or getattr(event, 'content', '')
+            agent_name = self._get_agent_from_event(event)
+            
+            if agent_name and chunk:
+                # Estimate tokens from chunk (rough: 1 token ≈ 4 chars for English)
+                estimated_tokens = max(1, len(chunk) // 4)
+                self.agent_live_tokens[agent_name] = self.agent_live_tokens.get(agent_name, 0) + estimated_tokens
+                
+                # Update current action to show streaming
+                self.agent_current_action[agent_name] = f"Generating response... ({self.agent_live_tokens[agent_name]} tokens)"
+                
+                logger.debug(f"Stream chunk for {agent_name}: +{estimated_tokens} tokens (total: {self.agent_live_tokens[agent_name]})")
+        except Exception as e:
+            logger.debug(f"Error handling stream chunk: {e}")
+
+    def _handle_llm_call_started(self, event):
+        """Handle LLM call start - track which agent is making an LLM call."""
+        try:
+            agent_name = self._get_agent_from_event(event)
+            model = getattr(event, 'model', 'unknown')
+            
+            if agent_name:
+                self.agent_current_llm_call[agent_name] = {
+                    'model': model,
+                    'start_time': datetime.now(UTC).isoformat(),
+                    'input_tokens': 0,
+                    'output_tokens': 0
+                }
+                self.agent_status[agent_name] = "working"
+                self.agent_current_action[agent_name] = f"Calling {model}..."
+                
+                self.add_activity_log(
+                    agent_name=agent_name,
+                    level="info",
+                    message=f"LLM call started: {model}",
+                    source="llm"
+                )
+                logger.debug(f"LLM call started for {agent_name}: {model}")
+        except Exception as e:
+            logger.debug(f"Error handling LLM call started: {e}")
+
+    def _handle_llm_call_completed(self, event):
+        """
+        Handle LLM call completion - capture final token counts.
+        
+        This event contains the authoritative token counts from the LLM provider.
+        """
+        try:
+            agent_name = self._get_agent_from_event(event)
+            
+            # Extract token usage from event
+            input_tokens = getattr(event, 'input_tokens', 0) or getattr(event, 'prompt_tokens', 0)
+            output_tokens = getattr(event, 'output_tokens', 0) or getattr(event, 'completion_tokens', 0)
+            model = getattr(event, 'model', 'claude-sonnet-4-5')
+            
+            # Try to get from usage dict if available
+            usage = getattr(event, 'usage', {}) or {}
+            if isinstance(usage, dict):
+                input_tokens = input_tokens or usage.get('input_tokens', 0) or usage.get('prompt_tokens', 0)
+                output_tokens = output_tokens or usage.get('output_tokens', 0) or usage.get('completion_tokens', 0)
+            
+            if agent_name and (input_tokens > 0 or output_tokens > 0):
+                # Update cumulative token usage for this agent
+                self.track_token_usage(
+                    agent_name=agent_name,
+                    model=model,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    cost_usd=self._calculate_cost(input_tokens, output_tokens)
+                )
+                
+                # Reset live token counter (we now have accurate count)
+                self.agent_live_tokens[agent_name] = 0
+                
+                # Clear current LLM call
+                self.agent_current_llm_call.pop(agent_name, None)
+                self.agent_current_action[agent_name] = "Processing response..."
+                
+                total = self.agent_token_usage[agent_name].total_tokens
+                self.add_activity_log(
+                    agent_name=agent_name,
+                    level="info",
+                    message=f"LLM call completed: +{input_tokens + output_tokens} tokens (total: {total})",
+                    source="llm"
+                )
+                logger.debug(f"LLM call completed for {agent_name}: {input_tokens}+{output_tokens} tokens")
+        except Exception as e:
+            logger.debug(f"Error handling LLM call completed: {e}")
+
+    def _handle_agent_execution_started(self, event):
+        """Handle agent execution start."""
+        try:
+            agent_name = self._get_agent_from_event(event)
+            if agent_name:
+                self.agent_status[agent_name] = "working"
+                self.agent_current_action[agent_name] = "Starting execution..."
+                self.add_activity_log(
+                    agent_name=agent_name,
+                    level="info",
+                    message="Agent execution started",
+                    source="orchestrator"
+                )
+                logger.debug(f"Agent execution started: {agent_name}")
+        except Exception as e:
+            logger.debug(f"Error handling agent execution started: {e}")
+
+    def _handle_agent_execution_completed(self, event):
+        """Handle agent execution completion."""
+        try:
+            agent_name = self._get_agent_from_event(event)
+            if agent_name:
+                self.agent_status[agent_name] = "completed"
+                self.agent_current_action[agent_name] = "Execution completed"
+                self.add_activity_log(
+                    agent_name=agent_name,
+                    level="info",
+                    message="Agent execution completed",
+                    source="orchestrator"
+                )
+                logger.debug(f"Agent execution completed: {agent_name}")
+        except Exception as e:
+            logger.debug(f"Error handling agent execution completed: {e}")
+
+    def _handle_task_started(self, event):
+        """Handle task start."""
+        try:
+            agent_name = self._get_agent_from_event(event)
+            task_description = getattr(event, 'description', '') or getattr(event, 'task', '')
+            if isinstance(task_description, object) and hasattr(task_description, 'description'):
+                task_description = task_description.description
+            
+            if agent_name:
+                self.agent_status[agent_name] = "working"
+                self.agent_task_description[agent_name] = str(task_description)[:200]
+                self.agent_current_task[agent_name] = str(task_description)[:100]
+                self.agent_current_action[agent_name] = "Working on task..."
+                self.add_activity_log(
+                    agent_name=agent_name,
+                    level="info",
+                    message=f"Task started: {str(task_description)[:80]}...",
+                    source="orchestrator"
+                )
+                logger.debug(f"Task started for {agent_name}")
+        except Exception as e:
+            logger.debug(f"Error handling task started: {e}")
+
+    def _handle_task_completed(self, event):
+        """Handle task completion."""
+        try:
+            agent_name = self._get_agent_from_event(event)
+            if agent_name:
+                self.agent_current_action[agent_name] = "Task completed"
+                self.add_activity_log(
+                    agent_name=agent_name,
+                    level="info",
+                    message="Task completed successfully",
+                    source="orchestrator"
+                )
+                logger.debug(f"Task completed for {agent_name}")
+        except Exception as e:
+            logger.debug(f"Error handling task completed: {e}")
+
+    def _handle_tool_usage_started(self, event):
+        """Handle tool usage start."""
+        try:
+            agent_name = self._get_agent_from_event(event)
+            tool_name = getattr(event, 'tool_name', '') or getattr(event, 'tool', 'unknown')
+            if isinstance(tool_name, object) and hasattr(tool_name, 'name'):
+                tool_name = tool_name.name
+            
+            if agent_name:
+                self.agent_tool_in_progress[agent_name] = str(tool_name)
+                self.agent_current_action[agent_name] = f"Using tool: {tool_name}"
+                self.add_activity_log(
+                    agent_name=agent_name,
+                    level="info",
+                    message=f"Tool started: {tool_name}",
+                    source="orchestrator"
+                )
+                logger.debug(f"Tool usage started for {agent_name}: {tool_name}")
+        except Exception as e:
+            logger.debug(f"Error handling tool usage started: {e}")
+
+    def _handle_tool_usage_finished(self, event):
+        """Handle tool usage completion."""
+        try:
+            agent_name = self._get_agent_from_event(event)
+            tool_name = getattr(event, 'tool_name', '') or getattr(event, 'tool', 'unknown')
+            if isinstance(tool_name, object) and hasattr(tool_name, 'name'):
+                tool_name = tool_name.name
+            result = getattr(event, 'result', None)
+            
+            if agent_name:
+                # Track the tool call
+                self.track_tool_call(
+                    agent_name=agent_name,
+                    tool_name=str(tool_name),
+                    result=str(result)[:200] if result else None
+                )
+                self.agent_tool_in_progress[agent_name] = None
+                self.agent_current_action[agent_name] = f"Tool completed: {tool_name}"
+                logger.debug(f"Tool usage finished for {agent_name}: {tool_name}")
+        except Exception as e:
+            logger.debug(f"Error handling tool usage finished: {e}")
+
+    def _get_agent_from_event(self, event) -> Optional[str]:
+        """
+        Extract agent name from a CrewAI event.
+        
+        Events may contain agent info in various ways - try multiple attributes.
+        """
+        # Try direct agent name
+        agent_name = getattr(event, 'agent_name', None)
+        if agent_name:
+            return self._normalize_agent_name(agent_name)
+        
+        # Try agent object
+        agent = getattr(event, 'agent', None)
+        if agent:
+            if hasattr(agent, 'name'):
+                return self._normalize_agent_name(agent.name)
+            if hasattr(agent, 'role'):
+                return self._normalize_agent_name(agent.role)
+        
+        # Try role
+        role = getattr(event, 'role', None)
+        if role:
+            return self._normalize_agent_name(role)
+        
+        # Fall back to current agent context
+        return self.current_agent
+
+    def _normalize_agent_name(self, name: str) -> Optional[str]:
+        """Normalize agent name to match our tracked agents."""
+        if not name:
+            return None
+        
+        name_lower = name.lower().strip()
+        
+        # Exact match
+        for agent_name in self.agent_names:
+            if agent_name.lower() == name_lower:
+                return agent_name
+        
+        # Partial match
+        for agent_name in self.agent_names:
+            if name_lower in agent_name.lower() or agent_name.lower() in name_lower:
+                return agent_name
+        
+        # If not found in our list, use the first agent as fallback (for single-agent crews)
+        if len(self.agent_names) == 1:
+            return self.agent_names[0]
+        
+        return None
+
+    def _calculate_cost(self, input_tokens: int, output_tokens: int) -> float:
+        """Calculate cost based on Claude Sonnet 4.5 pricing."""
+        # Sonnet 4.5 pricing (per million tokens)
+        cost_per_1m_input = 3.00
+        cost_per_1m_output = 15.00
+        
+        cost_usd = (
+            (input_tokens / 1_000_000) * cost_per_1m_input +
+            (output_tokens / 1_000_000) * cost_per_1m_output
+        )
+        return round(cost_usd, 6)
 
     def stop(self):
         """Stop the telemetry collection thread and write final summary."""
@@ -205,12 +611,29 @@ class TelemetryCollector:
             return
 
         self.running = False
+        
+        # Disconnect from event bus
+        self._disconnect_from_event_bus()
+        
         if self.thread:
             self.thread.join(timeout=5)
 
         # Write final summary
         if self.headless_mode or self.output_dir:
             self._write_final_summary()
+
+    def _disconnect_from_event_bus(self):
+        """Disconnect from the CrewAI event bus."""
+        if not self._event_bus_connected:
+            return
+        
+        try:
+            # Note: pyee-based event buses don't have a clean unsubscribe all
+            # The handlers will be cleaned up when the collector is garbage collected
+            self._event_bus_connected = False
+            logger.info("Disconnected from CrewAI event bus")
+        except Exception as e:
+            logger.warning(f"Error disconnecting from event bus: {e}")
 
         logger.info("Telemetry collector stopped")
 
@@ -332,6 +755,29 @@ class TelemetryCollector:
     def _report_agent_telemetry(self, agent_name: str, metrics: ProcessMetrics):
         """Report telemetry data for a specific agent to the API and/or files."""
         try:
+            # Get current token usage, including live streaming tokens if any
+            token_usage = self.agent_token_usage.get(agent_name)
+            if token_usage:
+                # Build token_data without cost_usd (UI calculates cost)
+                token_data = {
+                    "model": token_usage.model,
+                    "input_tokens": token_usage.input_tokens,
+                    "output_tokens": token_usage.output_tokens,
+                    "total_tokens": token_usage.total_tokens
+                }
+                # Add live streaming tokens (estimated, not yet finalized)
+                live_tokens = self.agent_live_tokens.get(agent_name, 0)
+                if live_tokens > 0:
+                    token_data['streaming_tokens'] = live_tokens
+                    token_data['total_tokens_with_streaming'] = token_data['total_tokens'] + live_tokens
+            else:
+                token_data = {
+                    "model": "claude-sonnet-4-5",
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "total_tokens": 0
+                }
+
             # Prepare telemetry payload with enhanced data
             payload = {
                 "team_id": self.team_id,
@@ -340,17 +786,20 @@ class TelemetryCollector:
                 "current_task": self.agent_current_task.get(agent_name, ""),
                 "current_action": self.agent_current_action.get(agent_name, ""),
                 "process_metrics": asdict(metrics),
-                "token_usage": asdict(self.agent_token_usage[agent_name]),
+                "token_usage": token_data,
                 "files_read": self.agent_files_read.get(agent_name, [])[-10:],
                 "files_written": self.agent_files_written.get(agent_name, [])[-10:],
                 "tool_calls": self.agent_tool_calls.get(agent_name, [])[-10:],
+                "tool_in_progress": self.agent_tool_in_progress.get(agent_name),
                 "git_activities": [
                     asdict(activity) for activity in self.agent_git_activities[agent_name][-10:]
                 ],
                 "activity_logs": [
                     asdict(log) for log in self.agent_activity_logs[agent_name][-50:]
                 ],
-                "timestamp": datetime.now(UTC).isoformat()
+                "timestamp": datetime.now(UTC).isoformat(),
+                "heartbeat": True,  # Explicit heartbeat flag for UI
+                "event_bus_connected": self._event_bus_connected  # Let UI know if we have live data
             }
 
             # Store event for file output

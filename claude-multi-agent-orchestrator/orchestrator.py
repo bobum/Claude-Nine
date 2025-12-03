@@ -127,8 +127,7 @@ class MockLLM:
                 "model": "claude-sonnet-4-5",
                 "input_tokens": self._total_input_tokens,
                 "output_tokens": self._total_output_tokens,
-                "total_tokens": self._total_input_tokens + self._total_output_tokens,
-                "cost_usd": round((self._total_input_tokens * 3.0 + self._total_output_tokens * 15.0) / 1_000_000, 4)
+                "total_tokens": self._total_input_tokens + self._total_output_tokens
             },
             "git_activities": [],
             "activity_logs": [
@@ -1075,6 +1074,7 @@ Be careful to produce valid, working code in your resolutions.
                     """Simulate crew execution with delays and fake telemetry."""
                     agent_name = feature_config.get('name', f'agent_{crew_index}')
                     work_item_id = feature_config.get('work_item_id')
+                    task_description = feature_config.get('description', f'Implement {agent_name}')
                     
                     # Simulate pending -> running transition (1-3 seconds)
                     pending_delay = random.uniform(1.0, 3.0)
@@ -1101,22 +1101,104 @@ Be careful to produce valid, working code in your resolutions.
                     elapsed = 0.0
                     total_input_tokens = 0
                     total_output_tokens = 0
+                    files_read = []
+                    files_written = []
+                    tool_calls = []
+                    git_activities = []
+                    activity_logs = []
+                    
+                    # Simulated actions to cycle through
+                    simulated_actions = [
+                        ("Analyzing codebase...", None),
+                        ("Reading file: src/index.ts", "git_read_file"),
+                        ("Calling claude-sonnet-4-5...", None),
+                        ("Generating response...", None),
+                        ("Writing file: src/feature.ts", "git_write_file"),
+                        ("Running tests...", "run_tests"),
+                        ("Committing changes...", "git_commit"),
+                    ]
+                    action_index = 0
                     
                     while elapsed < work_duration:
                         await asyncio.sleep(2.0)
                         elapsed += 2.0
                         
                         # Accumulate fake tokens
-                        total_input_tokens += random.randint(500, 1500)
-                        total_output_tokens += random.randint(200, 800)
+                        new_input = random.randint(500, 1500)
+                        new_output = random.randint(200, 800)
+                        total_input_tokens += new_input
+                        total_output_tokens += new_output
                         
-                        # Send fake telemetry
+                        # Simulate streaming tokens (some iterations show active streaming)
+                        is_streaming = random.choice([True, True, False])
+                        streaming_tokens = random.randint(50, 200) if is_streaming else None
+                        
+                        # Cycle through simulated actions
+                        current_action, tool_in_progress = simulated_actions[action_index % len(simulated_actions)]
+                        action_index += 1
+                        
+                        # Simulate file operations
+                        if "Reading" in current_action:
+                            fake_file = f"src/file_{random.randint(1,5)}.ts"
+                            if fake_file not in files_read:
+                                files_read.append(fake_file)
+                        elif "Writing" in current_action:
+                            fake_file = f"src/output_{random.randint(1,3)}.ts"
+                            if fake_file not in files_written:
+                                files_written.append(fake_file)
+                        
+                        # Simulate tool calls
+                        if tool_in_progress:
+                            tool_calls.append({
+                                "timestamp": datetime.now().isoformat(),
+                                "tool": tool_in_progress,
+                                "arguments": {"path": f"src/file_{random.randint(1,5)}.ts"},
+                                "result": "Success"
+                            })
+                            # Keep only last 10
+                            tool_calls = tool_calls[-10:]
+                        
+                        # Add activity log
+                        activity_logs.append({
+                            "timestamp": datetime.now().isoformat(),
+                            "level": "info",
+                            "message": f"LLM call completed: +{new_input + new_output} tokens (total: {total_input_tokens + total_output_tokens})",
+                            "source": "llm",
+                            "agent_name": agent_name
+                        })
+                        activity_logs.append({
+                            "timestamp": datetime.now().isoformat(),
+                            "level": "info",
+                            "message": current_action,
+                            "source": "orchestrator",
+                            "agent_name": agent_name
+                        })
+                        # Keep only last 50
+                        activity_logs = activity_logs[-50:]
+                        
+                        # Simulate git activity occasionally
+                        if random.random() < 0.2 and elapsed > 3:
+                            git_activities.append({
+                                "operation": random.choice(["commit", "branch_create"]),
+                                "branch": f"feature/{agent_name.lower().replace(' ', '-')}",
+                                "message": f"WIP: {task_description[:30]}...",
+                                "files_changed": random.randint(1, 5),
+                                "timestamp": datetime.now().isoformat(),
+                                "agent_name": agent_name
+                            })
+                            # Keep only last 10
+                            git_activities = git_activities[-10:]
+                        
+                        # Send fake telemetry with all enhanced fields
                         if self.team_id:
                             try:
                                 api_url = os.getenv("CLAUDE_NINE_API_URL", "http://localhost:8000")
                                 telemetry_data = {
                                     "team_id": self.team_id,
                                     "agent_name": agent_name,
+                                    "status": "working",
+                                    "current_task": task_description[:100],
+                                    "current_action": current_action,
                                     "process_metrics": {
                                         "pid": os.getpid(),
                                         "cpu_percent": round(random.uniform(15.0, 45.0), 1),
@@ -1129,17 +1211,18 @@ Be careful to produce valid, working code in your resolutions.
                                         "input_tokens": total_input_tokens,
                                         "output_tokens": total_output_tokens,
                                         "total_tokens": total_input_tokens + total_output_tokens,
-                                        "cost_usd": round((total_input_tokens * 3.0 + total_output_tokens * 15.0) / 1_000_000, 4)
+                                        "streaming_tokens": streaming_tokens,
+                                        "total_tokens_with_streaming": (total_input_tokens + total_output_tokens + streaming_tokens) if streaming_tokens else None
                                     },
-                                    "git_activities": [],
-                                    "activity_logs": [{
-                                        "timestamp": datetime.now().isoformat(),
-                                        "level": "info",
-                                        "message": f"Working... {elapsed:.0f}s elapsed",
-                                        "source": "mock",
-                                        "agent_name": agent_name
-                                    }],
-                                    "timestamp": datetime.now().isoformat()
+                                    "files_read": files_read[-10:],
+                                    "files_written": files_written[-10:],
+                                    "tool_calls": tool_calls[-10:],
+                                    "tool_in_progress": tool_in_progress,
+                                    "git_activities": git_activities,
+                                    "activity_logs": activity_logs,
+                                    "timestamp": datetime.now().isoformat(),
+                                    "heartbeat": True,
+                                    "event_bus_connected": True  # Simulate as if event bus is connected
                                 }
                                 requests.post(
                                     f"{api_url}/api/telemetry/agent/{agent_name}",
@@ -1148,6 +1231,49 @@ Be careful to produce valid, working code in your resolutions.
                                 )
                             except Exception as e:
                                 logger.warning(f"[MOCK] Failed to send telemetry: {e}")
+                    
+                    # Send final "completed" telemetry
+                    if self.team_id:
+                        try:
+                            api_url = os.getenv("CLAUDE_NINE_API_URL", "http://localhost:8000")
+                            telemetry_data = {
+                                "team_id": self.team_id,
+                                "agent_name": agent_name,
+                                "status": "completed",
+                                "current_task": task_description[:100],
+                                "current_action": "Task completed successfully",
+                                "process_metrics": {
+                                    "pid": os.getpid(),
+                                    "cpu_percent": 2.0,
+                                    "memory_mb": round(random.uniform(150.0, 200.0), 1),
+                                    "threads": 4,
+                                    "status": "running"
+                                },
+                                "token_usage": {
+                                    "model": "claude-sonnet-4-5",
+                                    "input_tokens": total_input_tokens,
+                                    "output_tokens": total_output_tokens,
+                                    "total_tokens": total_input_tokens + total_output_tokens,
+                                    "streaming_tokens": None,
+                                    "total_tokens_with_streaming": None
+                                },
+                                "files_read": files_read[-10:],
+                                "files_written": files_written[-10:],
+                                "tool_calls": tool_calls[-10:],
+                                "tool_in_progress": None,
+                                "git_activities": git_activities,
+                                "activity_logs": activity_logs,
+                                "timestamp": datetime.now().isoformat(),
+                                "heartbeat": True,
+                                "event_bus_connected": True
+                            }
+                            requests.post(
+                                f"{api_url}/api/telemetry/agent/{agent_name}",
+                                json=telemetry_data,
+                                timeout=5
+                            )
+                        except Exception as e:
+                            logger.warning(f"[MOCK] Failed to send final telemetry: {e}")
                     
                     logger.info(f"[MOCK] {agent_name}: completed")
                     return f"Mock result for {agent_name}"

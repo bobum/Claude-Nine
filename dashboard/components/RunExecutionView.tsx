@@ -192,7 +192,7 @@ export default function RunExecutionView({
                     </div>
                     <div>
                       <span className="text-gray-500">$:</span>{" "}
-                      <span className="text-yellow-400">${telemetry.token_usage?.cost_usd?.toFixed(4) ?? "0.0000"}</span>
+                      <span className="text-yellow-400">${(((telemetry.token_usage?.input_tokens ?? 0) / 1_000_000 * 3.00) + ((telemetry.token_usage?.output_tokens ?? 0) / 1_000_000 * 15.00)).toFixed(4)}</span>
                     </div>
                   </div>
                 </div>
