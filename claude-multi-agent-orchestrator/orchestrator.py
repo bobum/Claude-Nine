@@ -1314,10 +1314,6 @@ def main():
     )
 
     args = parser.parse_args()
-    
-    # FORCE DRY RUN - hardcoded to prevent accidental API costs
-    args.dry_run = True
-    logger.info("*** DRY RUN MODE FORCED - No Anthropic API calls will be made ***")
 
     # Change to repo directory if specified
     if args.repo != '.':
