@@ -95,7 +95,12 @@ class OrchestratorService:
         Returns:
             dict with status information
         """
-        print(f"=== DEBUG: start_team called for team {team_id} ===")
+        # Force dry-run if configured at API level
+        if settings.force_dry_run:
+            dry_run = True
+            logger.info("FORCE_DRY_RUN is enabled - orchestrator will use mock LLM")
+        
+        print(f"=== DEBUG: start_team called for team {team_id}, dry_run={dry_run} ===")
         team_id_str = str(team_id)
 
         # Check if already running

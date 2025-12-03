@@ -175,7 +175,6 @@ export default function TeamDetailPage() {
         team_id: teamId,
         session_id: sessionId,
         selected_work_item_ids: Array.from(selectedWorkItems),
-        dry_run: true,  // Always use dry-run for now to avoid API costs
       });
       setActiveRun(run);
       setSelectedWorkItems(new Set());
