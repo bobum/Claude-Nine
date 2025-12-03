@@ -593,33 +593,19 @@ echo ""
 echo "Checking Dashboard build..."
 cd dashboard
 
-# Check if .next directory exists and has required files
-NEEDS_BUILD=false
-if [ ! -d ".next" ]; then
-    echo -e "\${YELLOW}⚠ Dashboard not built (.next directory missing)\${NC}"
-    NEEDS_BUILD=true
-elif [ ! -f ".next/BUILD_ID" ]; then
-    echo -e "\${YELLOW}⚠ Dashboard build appears incomplete (missing BUILD_ID)\${NC}"
-    NEEDS_BUILD=true
-elif [ ! -d ".next/static" ]; then
-    echo -e "\${YELLOW}⚠ Dashboard build appears corrupted (missing static files)\${NC}"
-    NEEDS_BUILD=true
-fi
+# Always delete .next to force rebuild (ensures code changes are picked up)
+echo "Removing old dashboard build..."
+rm -rf .next
 
-# Rebuild if needed
-if [ "\$NEEDS_BUILD" = true ]; then
-    echo "Building dashboard (this may take a minute)..."
-    rm -rf .next
-    if npm run build > ../logs/dashboard-build.log 2>&1; then
-        echo -e "\${GREEN}✓ Dashboard built successfully\${NC}"
-    else
-        echo -e "\${RED}✗ Dashboard build failed\${NC}"
-        echo "Check logs/dashboard-build.log for details"
-        kill \$API_PID 2>/dev/null
-        exit 1
-    fi
+# Rebuild dashboard
+echo "Building dashboard (this may take a minute)..."
+if npm run build > ../logs/dashboard-build.log 2>&1; then
+    echo -e "\${GREEN}✓ Dashboard built successfully\${NC}"
 else
-    echo -e "\${GREEN}✓ Dashboard build is valid\${NC}"
+    echo -e "\${RED}✗ Dashboard build failed\${NC}"
+    echo "Check logs/dashboard-build.log for details"
+    kill \$API_PID 2>/dev/null
+    exit 1
 fi
 
 # Start Dashboard in production mode

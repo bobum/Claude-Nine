@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Depends, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+import logging
 
 from .database import engine, get_db, Base
 from .config import settings
@@ -8,8 +9,16 @@ from .routes import teams, work_items, personas, telemetry, runs
 from .routes import settings as settings_router
 from .websocket import manager
 
+logger = logging.getLogger(__name__)
+
 # Create tables (for development - use Alembic in production)
 Base.metadata.create_all(bind=engine)
+
+# Log startup mode
+if settings.force_dry_run:
+    logger.warning("*** DRY-RUN MODE ENABLED - Orchestrator will use mock LLM (no API credits) ***")
+else:
+    logger.info("LIVE MODE - Orchestrator will use real Anthropic API")
 
 # Initialize FastAPI
 app = FastAPI(

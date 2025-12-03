@@ -276,21 +276,23 @@ export default function RunExecutionView({
         </div>
       )}
 
-      {/* Task Cards Grid */}
-      <div>
-        <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">
-          Tasks ({run.tasks.length})
-        </h3>
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {run.tasks.map((task, index) => (
-            <TaskCard
-              key={task.id}
-              task={task}
-              telemetry={getTelemetryForTask(task, index)}
-            />
-          ))}
+      {/* Task Cards Grid - Only show when run is completed (as summary) */}
+      {run.status === "completed" && (
+        <div>
+          <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">
+            Tasks Summary ({run.tasks.length})
+          </h3>
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {run.tasks.map((task, index) => (
+              <TaskCard
+                key={task.id}
+                task={task}
+                telemetry={getTelemetryForTask(task, index)}
+              />
+            ))}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

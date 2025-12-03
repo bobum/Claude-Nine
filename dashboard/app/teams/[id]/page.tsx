@@ -101,11 +101,32 @@ export default function TeamDetailPage() {
         // Handle telemetry updates
         if (message.type === "agent_telemetry" && message.team_id === teamId) {
           const telemetryData = message.data as AgentTelemetry;
-          console.log('[Telemetry] Received telemetry for agent:', telemetryData.agent_name);
-          setTaskTelemetry((prev) => ({
-            ...prev,
-            [telemetryData.agent_name]: telemetryData,
-          }));
+          const newTokens = telemetryData.token_usage?.total_tokens ?? 0;
+          console.log('[Telemetry] Received:', telemetryData.agent_name, 'tokens:', newTokens);
+          
+          setTaskTelemetry((prev) => {
+            const existing = prev[telemetryData.agent_name];
+            const existingTokens = existing?.token_usage?.total_tokens ?? 0;
+            
+            console.log('[Telemetry] Check:', telemetryData.agent_name, 'new:', newTokens, 'existing:', existingTokens);
+            
+            // If new tokens is zero and we have existing non-zero tokens, keep old token_usage
+            if (newTokens === 0 && existingTokens > 0) {
+              console.log('[Telemetry] KEEPING old tokens for', telemetryData.agent_name);
+              return {
+                ...prev,
+                [telemetryData.agent_name]: {
+                  ...telemetryData,
+                  token_usage: existing.token_usage,
+                },
+              };
+            }
+            console.log('[Telemetry] UPDATING tokens for', telemetryData.agent_name);
+            return {
+              ...prev,
+              [telemetryData.agent_name]: telemetryData,
+            };
+          });
         }
 
         // Handle work item status updates - update activeRun tasks in real-time
