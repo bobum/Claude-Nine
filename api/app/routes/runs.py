@@ -193,3 +193,52 @@ def delete_run(run_id: UUID, db: Session = Depends(get_db)):
     db.delete(run)
     db.commit()
     return {"message": "Run deleted"}
+
+
+@router.patch("/tasks/by-work-item/{work_item_id}")
+def update_task_by_work_item(
+    work_item_id: UUID,
+    status: RunTaskStatus = None,
+    agent_name: str = None,
+    branch_name: str = None,
+    worktree_path: str = None,
+    error_message: str = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Update a run task by work_item_id.
+    
+    This endpoint is used by the orchestrator subprocess to update task status
+    and set agent_name without needing to know the run_id or task_id.
+    Only updates tasks in active (pending/running) runs.
+    """
+    # Find the task by work_item_id in an active run
+    task = db.query(RunTask).join(Run).filter(
+        RunTask.work_item_id == work_item_id,
+        Run.status.in_(["pending", "running", "merging"])
+    ).first()
+    
+    if not task:
+        raise HTTPException(
+            status_code=404, 
+            detail=f"No active task found for work_item_id {work_item_id}"
+        )
+
+    if status:
+        task.status = status.value
+        if status == RunTaskStatus.running and not task.started_at:
+            task.started_at = datetime.utcnow()
+        if status in [RunTaskStatus.completed, RunTaskStatus.failed]:
+            task.completed_at = datetime.utcnow()
+    if agent_name:
+        task.agent_name = agent_name
+    if branch_name:
+        task.branch_name = branch_name
+    if worktree_path:
+        task.worktree_path = worktree_path
+    if error_message:
+        task.error_message = error_message
+
+    db.commit()
+    db.refresh(task)
+    return task

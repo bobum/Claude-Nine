@@ -16,6 +16,41 @@ from ..schemas import (
 router = APIRouter()
 
 
+@router.get("/kill-all-orchestrators")
+def kill_all_orchestrators():
+    """
+    Emergency kill switch - terminates ALL python processes except the API.
+    Use when orchestrators are stuck or misbehaving.
+    """
+    import psutil
+    import os
+    
+    killed = []
+    current_pid = os.getpid()
+    parent_pid = os.getppid()
+    
+    for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+        try:
+            if 'python' not in proc.info['name'].lower():
+                continue
+            pid = proc.info['pid']
+            if pid == current_pid or pid == parent_pid:
+                continue
+            proc.kill()
+            killed.append(pid)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+    
+    from ..services.orchestrator_service import get_orchestrator_service
+    orch_service = get_orchestrator_service()
+    orch_service.running_orchestrators.clear()
+    
+    return {
+        "message": f"Killed {len(killed)} python processes",
+        "killed_pids": killed
+    }
+
+
 @router.get("/", response_model=List[TeamSchema])
 def list_teams(
     skip: int = 0,

@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     api_port: int = 8000
     debug: bool = False
 
+    # Orchestrator - force dry-run mode (no Anthropic API calls)
+    force_dry_run: bool = True
+
     # Security
     secret_key: str
 

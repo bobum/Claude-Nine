@@ -52,16 +52,114 @@ class MockLLM:
     
     Simulates LLM responses without making actual API calls.
     Useful for testing the orchestrator workflow without consuming credits.
+    
+    Enhanced for realistic UI testing:
+    - Simulates realistic delays (5-10 seconds per "LLM call")
+    - Generates fake telemetry (CPU, memory, token usage)
+    - Updates task status via API
     """
     
-    def __init__(self, model: str = "mock", api_key: str = None, max_tokens: int = 4096, **kwargs):
+    # Class-level tracking for all mock instances
+    _instances: Dict[str, 'MockLLM'] = {}
+    
+    def __init__(self, model: str = "mock", api_key: str = None, max_tokens: int = 4096, 
+                 agent_name: str = None, work_item_id: str = None, team_id: str = None, **kwargs):
         self.model = model
         self.max_tokens = max_tokens
         self._call_count = 0
-        logger.info(f"MockLLM initialized (model={model}, max_tokens={max_tokens})")
+        self.agent_name = agent_name
+        self.work_item_id = work_item_id
+        self.team_id = team_id
+        self.api_url = os.getenv("CLAUDE_NINE_API_URL", "http://localhost:8000")
+        
+        # Token tracking for this agent
+        self._total_input_tokens = 0
+        self._total_output_tokens = 0
+        
+        # Register this instance
+        if agent_name:
+            MockLLM._instances[agent_name] = self
+        
+        logger.info(f"MockLLM initialized (model={model}, agent={agent_name}, work_item={work_item_id})")
+    
+    def _update_task_status(self, status: str):
+        """Update task status via API."""
+        if not self.work_item_id:
+            return
+        try:
+            response = requests.patch(
+                f"{self.api_url}/api/runs/tasks/by-work-item/{self.work_item_id}",
+                params={
+                    "status": status,
+                    "agent_name": self.agent_name
+                },
+                timeout=5
+            )
+            if response.status_code == 200:
+                logger.info(f"[DRY-RUN] Updated task status to '{status}' for work_item {self.work_item_id}")
+            else:
+                logger.warning(f"[DRY-RUN] Failed to update task status: {response.status_code}")
+        except Exception as e:
+            logger.warning(f"[DRY-RUN] Could not update task status: {e}")
+    
+    def _send_telemetry(self):
+        """Send fake telemetry data to the API."""
+        if not self.agent_name or not self.team_id:
+            return
+        
+        import random
+        
+        # Generate realistic-looking metrics
+        cpu_percent = random.uniform(15.0, 45.0)
+        memory_mb = random.uniform(200.0, 500.0)
+        
+        telemetry_data = {
+            "team_id": self.team_id,
+            "agent_name": self.agent_name,
+            "process_metrics": {
+                "pid": os.getpid(),
+                "cpu_percent": round(cpu_percent, 1),
+                "memory_mb": round(memory_mb, 1),
+                "threads": 4,
+                "status": "running"
+            },
+            "token_usage": {
+                "model": "claude-sonnet-4-5",
+                "input_tokens": self._total_input_tokens,
+                "output_tokens": self._total_output_tokens,
+                "total_tokens": self._total_input_tokens + self._total_output_tokens,
+                "cost_usd": round((self._total_input_tokens * 3.0 + self._total_output_tokens * 15.0) / 1_000_000, 4)
+            },
+            "git_activities": [],
+            "activity_logs": [
+                {
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "level": "info",
+                    "message": f"Processing task (call #{self._call_count})",
+                    "source": "mock_llm",
+                    "agent_name": self.agent_name
+                }
+            ],
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+        try:
+            response = requests.post(
+                f"{self.api_url}/api/telemetry/agent/{self.agent_name}",
+                json=telemetry_data,
+                timeout=5
+            )
+            if response.status_code == 200:
+                logger.debug(f"[DRY-RUN] Sent telemetry for {self.agent_name}")
+            else:
+                logger.warning(f"[DRY-RUN] Failed to send telemetry: {response.status_code}")
+        except Exception as e:
+            logger.warning(f"[DRY-RUN] Could not send telemetry: {e}")
     
     def call(self, messages, **kwargs):
-        """Simulate LLM call with canned responses."""
+        """Simulate LLM call with realistic delays and telemetry."""
+        import random
+        
         self._call_count += 1
         
         # Extract the last user message to understand context
@@ -72,11 +170,35 @@ class MockLLM:
                     last_message = msg.get("content", "")[:200]
                     break
         
-        # Simulate thinking delay
-        import time
-        time.sleep(0.5)
+        logger.info(f"[DRY-RUN] MockLLM call #{self._call_count} for {self.agent_name}: {last_message[:50]}...")
         
-        logger.info(f"MockLLM call #{self._call_count}: {last_message[:50]}...")
+        # First call: transition to "running" status with 1-3s pending delay
+        if self._call_count == 1:
+            pending_delay = random.uniform(1.0, 3.0)
+            logger.info(f"[DRY-RUN] Simulating pending state for {pending_delay:.1f}s")
+            time.sleep(pending_delay)
+            self._update_task_status("running")
+        
+        # Simulate work with 5-10 second delay, sending telemetry periodically
+        work_duration = random.uniform(5.0, 10.0)
+        logger.info(f"[DRY-RUN] Simulating work for {work_duration:.1f}s")
+        
+        elapsed = 0.0
+        telemetry_interval = 2.0  # Send telemetry every 2 seconds
+        
+        while elapsed < work_duration:
+            sleep_time = min(telemetry_interval, work_duration - elapsed)
+            time.sleep(sleep_time)
+            elapsed += sleep_time
+            
+            # Simulate token accumulation
+            self._total_input_tokens += random.randint(500, 1500)
+            self._total_output_tokens += random.randint(200, 800)
+            
+            # Send telemetry update
+            self._send_telemetry()
+        
+        logger.info(f"[DRY-RUN] MockLLM call #{self._call_count} completed")
         
         # Return a generic task completion response
         return f"""I have analyzed the task and here is my simulated response (dry-run mode, call #{self._call_count}).
@@ -89,7 +211,7 @@ For this feature implementation task, I would:
 5. Commit the changes with a descriptive message
 
 [DRY-RUN] This is a simulated response. No actual code changes were made.
-[DRY-RUN] In a real run, I would interact with the git tools to make commits.
+[DRY-RUN] Tokens used: {self._total_input_tokens} input, {self._total_output_tokens} output
 
 Final Answer: Task completed successfully (simulated in dry-run mode).
 """
@@ -159,22 +281,22 @@ class MultiAgentOrchestrator:
         if headless_mode:
             logger.info("Running in headless mode - telemetry will be written to files")
 
-        # Set up API key - environment variable takes precedence over config
-        env_api_key = os.getenv('ANTHROPIC_API_KEY')
-        config_api_key = self.config.get('anthropic_api_key', '')
+        # Set up API key - only needed for real mode
+        if not self.dry_run:
+            env_api_key = os.getenv('ANTHROPIC_API_KEY')
+            config_api_key = self.config.get('anthropic_api_key', '')
 
-        if env_api_key and env_api_key.startswith('sk-'):
-            # Environment variable is set with a valid-looking key
-            logger.info(f"Using ANTHROPIC_API_KEY from environment: {env_api_key[:20]}...")
-        elif config_api_key and config_api_key.startswith('sk-'):
-            # Use config value as fallback (only if it looks like a real key)
-            os.environ['ANTHROPIC_API_KEY'] = config_api_key
-            logger.info(f"Set ANTHROPIC_API_KEY from config: {config_api_key[:20]}...")
-        elif env_api_key:
-            # Env var exists but doesn't look like a key
-            logger.warning(f"ANTHROPIC_API_KEY in env doesn't look valid: {env_api_key[:20]}...")
+            if env_api_key and env_api_key.startswith('sk-'):
+                logger.info(f"Using ANTHROPIC_API_KEY from environment: {env_api_key[:20]}...")
+            elif config_api_key and config_api_key.startswith('sk-'):
+                os.environ['ANTHROPIC_API_KEY'] = config_api_key
+                logger.info(f"Set ANTHROPIC_API_KEY from config: {config_api_key[:20]}...")
+            elif env_api_key:
+                logger.warning(f"ANTHROPIC_API_KEY in env doesn't look valid: {env_api_key[:20]}...")
+            else:
+                logger.error("ANTHROPIC_API_KEY not found in environment or config!")
         else:
-            logger.error("ANTHROPIC_API_KEY not found in environment or config!")
+            logger.info("DRY RUN MODE: Skipping API key setup - will use mock execution")
 
         # Register cleanup handler
         atexit.register(self.cleanup)
@@ -314,11 +436,14 @@ happen in your own workspace: {worktree_abs_path}
 Always make commits with descriptive messages. Work independently and focus on your feature.
 """
 
-            # Create LLM with explicit API key (or MockLLM for dry-run)
+            # Create LLM - real or mock based on dry_run flag
             if self.dry_run:
                 llm = MockLLM(
                     model="anthropic/claude-sonnet-4-5-20250929",
-                    max_tokens=4096
+                    max_tokens=4096,
+                    agent_name=agent_name,
+                    work_item_id=feature_config.get('work_item_id'),
+                    team_id=self.team_id
                 )
             else:
                 llm = LLM(
@@ -491,17 +616,19 @@ Guidelines for resolution:
 - Ensure the result is syntactically valid code
 """
 
-        # Use MockLLM for dry-run mode
+        # Create LLM - real or mock based on dry_run flag
         if self.dry_run:
             llm = MockLLM(
                 model="anthropic/claude-sonnet-4-5-20250929",
-                max_tokens=8192
+                max_tokens=8192,
+                agent_name="resolver",
+                team_id=self.team_id
             )
         else:
             llm = LLM(
                 model="anthropic/claude-sonnet-4-5-20250929",
                 api_key=os.getenv("ANTHROPIC_API_KEY"),
-                max_tokens=8192  # Larger for code resolution
+                max_tokens=8192
             )
 
         agent = Agent(
@@ -938,36 +1065,146 @@ Be careful to produce valid, working code in your resolutions.
 
             # Run all crews in parallel using asyncio
             import asyncio
+            import random
 
-            async def run_crews_parallel(crews_list):
-                """Run all crews in parallel and collect results."""
-                tasks = [crew.kickoff_async() for crew in crews_list]
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-                return results
+            if self.dry_run:
+                # DRY RUN MODE: Fake the crew execution
+                logger.info("*** DRY RUN MODE: Faking crew execution ***")
+                
+                async def mock_crew_execution(crew_index, feature_config):
+                    """Simulate crew execution with delays and fake telemetry."""
+                    agent_name = feature_config.get('name', f'agent_{crew_index}')
+                    work_item_id = feature_config.get('work_item_id')
+                    
+                    # Simulate pending -> running transition (1-3 seconds)
+                    pending_delay = random.uniform(1.0, 3.0)
+                    logger.info(f"[MOCK] {agent_name}: pending for {pending_delay:.1f}s")
+                    await asyncio.sleep(pending_delay)
+                    
+                    # Update task status to running
+                    if work_item_id and self.team_id:
+                        try:
+                            api_url = os.getenv("CLAUDE_NINE_API_URL", "http://localhost:8000")
+                            requests.patch(
+                                f"{api_url}/api/runs/tasks/by-work-item/{work_item_id}",
+                                params={"status": "running", "agent_name": agent_name},
+                                timeout=5
+                            )
+                            logger.info(f"[MOCK] {agent_name}: status -> running")
+                        except Exception as e:
+                            logger.warning(f"[MOCK] Failed to update task status: {e}")
+                    
+                    # Simulate work (5-15 seconds) with telemetry updates
+                    work_duration = random.uniform(5.0, 15.0)
+                    logger.info(f"[MOCK] {agent_name}: working for {work_duration:.1f}s")
+                    
+                    elapsed = 0.0
+                    total_input_tokens = 0
+                    total_output_tokens = 0
+                    
+                    while elapsed < work_duration:
+                        await asyncio.sleep(2.0)
+                        elapsed += 2.0
+                        
+                        # Accumulate fake tokens
+                        total_input_tokens += random.randint(500, 1500)
+                        total_output_tokens += random.randint(200, 800)
+                        
+                        # Send fake telemetry
+                        if self.team_id:
+                            try:
+                                api_url = os.getenv("CLAUDE_NINE_API_URL", "http://localhost:8000")
+                                telemetry_data = {
+                                    "team_id": self.team_id,
+                                    "agent_name": agent_name,
+                                    "process_metrics": {
+                                        "pid": os.getpid(),
+                                        "cpu_percent": round(random.uniform(15.0, 45.0), 1),
+                                        "memory_mb": round(random.uniform(200.0, 500.0), 1),
+                                        "threads": 4,
+                                        "status": "running"
+                                    },
+                                    "token_usage": {
+                                        "model": "claude-sonnet-4-5",
+                                        "input_tokens": total_input_tokens,
+                                        "output_tokens": total_output_tokens,
+                                        "total_tokens": total_input_tokens + total_output_tokens,
+                                        "cost_usd": round((total_input_tokens * 3.0 + total_output_tokens * 15.0) / 1_000_000, 4)
+                                    },
+                                    "git_activities": [],
+                                    "activity_logs": [{
+                                        "timestamp": datetime.now().isoformat(),
+                                        "level": "info",
+                                        "message": f"Working... {elapsed:.0f}s elapsed",
+                                        "source": "mock",
+                                        "agent_name": agent_name
+                                    }],
+                                    "timestamp": datetime.now().isoformat()
+                                }
+                                requests.post(
+                                    f"{api_url}/api/telemetry/agent/{agent_name}",
+                                    json=telemetry_data,
+                                    timeout=5
+                                )
+                            except Exception as e:
+                                logger.warning(f"[MOCK] Failed to send telemetry: {e}")
+                    
+                    logger.info(f"[MOCK] {agent_name}: completed")
+                    return f"Mock result for {agent_name}"
 
-            # Execute all crews in parallel
-            logger.info("Starting parallel crew execution...")
-            try:
-                # Get or create event loop
+                async def run_mock_parallel():
+                    """Run all mock crews in parallel."""
+                    tasks = [mock_crew_execution(i, self.tasks_config[i]) for i in range(len(crews))]
+                    return await asyncio.gather(*tasks, return_exceptions=True)
+
+                # Execute mock crews
+                logger.info("Starting mock parallel execution...")
                 try:
-                    loop = asyncio.get_running_loop()
-                    import concurrent.futures
-                    future = asyncio.run_coroutine_threadsafe(run_crews_parallel(crews), loop)
-                    results = future.result()
-                except RuntimeError:
-                    # No running loop, create one
-                    results = asyncio.run(run_crews_parallel(crews))
+                    try:
+                        loop = asyncio.get_running_loop()
+                        import concurrent.futures
+                        future = asyncio.run_coroutine_threadsafe(run_mock_parallel(), loop)
+                        results = future.result()
+                    except RuntimeError:
+                        results = asyncio.run(run_mock_parallel())
 
-                # Check for any exceptions in results
-                for idx, result in enumerate(results):
-                    if isinstance(result, Exception):
-                        logger.error(f"Crew {idx} failed with error: {result}")
-                    else:
-                        logger.info(f"Crew {idx} completed successfully")
+                    for idx, result in enumerate(results):
+                        if isinstance(result, Exception):
+                            logger.error(f"Mock crew {idx} failed: {result}")
+                        else:
+                            logger.info(f"Mock crew {idx} completed: {result}")
 
-            except Exception as e:
-                logger.error(f"Error during parallel crew execution: {e}")
-                raise
+                except Exception as e:
+                    logger.error(f"Error during mock execution: {e}")
+                    raise
+
+            else:
+                # REAL MODE: Execute crews with CrewAI
+                async def run_crews_parallel(crews_list):
+                    """Run all crews in parallel and collect results."""
+                    tasks = [crew.kickoff_async() for crew in crews_list]
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
+                    return results
+
+                logger.info("Starting parallel crew execution...")
+                try:
+                    try:
+                        loop = asyncio.get_running_loop()
+                        import concurrent.futures
+                        future = asyncio.run_coroutine_threadsafe(run_crews_parallel(crews), loop)
+                        results = future.result()
+                    except RuntimeError:
+                        results = asyncio.run(run_crews_parallel(crews))
+
+                    for idx, result in enumerate(results):
+                        if isinstance(result, Exception):
+                            logger.error(f"Crew {idx} failed with error: {result}")
+                        else:
+                            logger.info(f"Crew {idx} completed successfully")
+
+                except Exception as e:
+                    logger.error(f"Error during parallel crew execution: {e}")
+                    raise
 
             logger.info("="*80)
             logger.info("All feature tasks completed")

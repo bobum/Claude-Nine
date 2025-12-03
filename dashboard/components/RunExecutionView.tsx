@@ -16,6 +16,19 @@ export default function RunExecutionView({
   onCancel,
   isConnected = false,
 }: RunExecutionViewProps) {
+    // Get all telemetry entries for display
+    const allTelemetry = Object.entries(taskTelemetry);
+
+    // Try to match telemetry to task by agent_name or by index as fallback
+    const getTelemetryForTask = (task: Run["tasks"][0], index: number): AgentTelemetry | null => {
+      if (task.agent_name && taskTelemetry[task.agent_name]) {
+        return taskTelemetry[task.agent_name];
+      }
+      if (allTelemetry[index]) {
+        return allTelemetry[index][1];
+      }
+      return null;
+    };
   const getRunStatusColor = (status: string) => {
     switch (status) {
       case "running":
@@ -150,7 +163,55 @@ export default function RunExecutionView({
           </div>
         </div>
       </div>
+        {/* Live Telemetry Feed - Shows raw websocket data */}
+        {isActive && allTelemetry.length > 0 && (
+          <div className="bg-gray-900 rounded-lg shadow p-4">
+            <h3 className="text-sm font-semibold text-green-400 mb-3 flex items-center gap-2">
+              <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+              Live Telemetry Feed ({allTelemetry.length} agents)
+            </h3>
+            <div className="space-y-2 max-h-64 overflow-y-auto">
+              {allTelemetry.map(([agentName, telemetry]) => (
+                <div key={agentName} className="bg-gray-800 rounded p-3 font-mono text-xs">
+                  <div className="flex justify-between items-start mb-2">
+                    <span className="text-cyan-400 font-bold">{agentName}</span>
+                    <span className="text-yellow-400">ts: {telemetry.timestamp}</span>
+                  </div>
+                  <div className="grid grid-cols-4 gap-4 text-gray-300">
+                    <div>
+                      <span className="text-gray-500">CPU:</span>{" "}
+                      <span className="text-green-400">{telemetry.process_metrics?.cpu_percent?.toFixed(1) ?? "N/A"}%</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-500">MEM:</span>{" "}
+                      <span className="text-blue-400">{telemetry.process_metrics?.memory_mb?.toFixed(0) ?? "N/A"}MB</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-500">TKN:</span>{" "}
+                      <span className="text-purple-400">{telemetry.token_usage?.total_tokens?.toLocaleString() ?? "0"}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-500">$:</span>{" "}
+                      <span className="text-yellow-400">${telemetry.token_usage?.cost_usd?.toFixed(4) ?? "0.0000"}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
+        {/* No Telemetry Warning */}
+        {isActive && allTelemetry.length === 0 && (
+          <div className="bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 border-2 border-yellow-500 border-t-transparent rounded-full animate-spin"></div>
+              <span className="text-yellow-700 dark:text-yellow-300 text-sm">
+                Waiting for telemetry data from agents...
+              </span>
+            </div>
+          </div>
+        )}
       {/* Merge Phase Status */}
       {run.status === "merging" && (
         <div className="bg-purple-50 dark:bg-purple-900/30 border border-purple-200 dark:border-purple-800 rounded-lg p-6">
@@ -221,11 +282,11 @@ export default function RunExecutionView({
           Tasks ({run.tasks.length})
         </h3>
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {run.tasks.map((task) => (
+          {run.tasks.map((task, index) => (
             <TaskCard
               key={task.id}
               task={task}
-              telemetry={task.agent_name ? taskTelemetry[task.agent_name] : null}
+              telemetry={getTelemetryForTask(task, index)}
             />
           ))}
         </div>

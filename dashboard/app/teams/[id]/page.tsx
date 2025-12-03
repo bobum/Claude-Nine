@@ -92,23 +92,56 @@ export default function TeamDetailPage() {
     return () => clearInterval(interval);
   }, [loadTeam]);
 
-  // Handle WebSocket messages for telemetry updates
-  useEffect(() => {
-    if (lastMessage) {
-      const message = lastMessage;
-      console.log('[WebSocket] Received message:', message.type, message);
+  // Handle WebSocket messages for telemetry and status updates
+    useEffect(() => {
+      if (lastMessage) {
+        const message = lastMessage;
+        console.log('[WebSocket] Received message:', message.type, message);
 
-      // Check if this is a telemetry update for a task in this team's active run
-      if (message.type === "agent_telemetry" && message.team_id === teamId) {
-        const telemetryData = message.data as AgentTelemetry;
-        console.log('[Telemetry] Received telemetry for agent:', telemetryData.agent_name);
-        setTaskTelemetry((prev) => ({
-          ...prev,
-          [telemetryData.agent_name]: telemetryData,
-        }));
+        // Handle telemetry updates
+        if (message.type === "agent_telemetry" && message.team_id === teamId) {
+          const telemetryData = message.data as AgentTelemetry;
+          console.log('[Telemetry] Received telemetry for agent:', telemetryData.agent_name);
+          setTaskTelemetry((prev) => ({
+            ...prev,
+            [telemetryData.agent_name]: telemetryData,
+          }));
+        }
+
+        // Handle work item status updates - update activeRun tasks in real-time
+        if (message.type === "work_item_update") {
+          const workItemData = message.data as WorkItem;
+          console.log('[WorkItem] Status update:', workItemData.id, workItemData.status);
+
+          // Update the task status in activeRun if this work item is in our run
+          setActiveRun((prev) => {
+            if (!prev) return prev;
+            const updatedTasks = prev.tasks.map((task) => {
+              if (task.work_item_id === workItemData.id) {
+                // Map work item status to task status
+                let taskStatus = task.status;
+                if (workItemData.status === "in_progress") taskStatus = "running";
+                else if (workItemData.status === "completed" || workItemData.status === "pr_ready") taskStatus = "completed";
+                else if (workItemData.status === "blocked" || workItemData.status === "cancelled") taskStatus = "failed";
+                return {
+                  ...task,
+                  status: taskStatus,
+                  work_item: { ...task.work_item, ...workItemData } as typeof task.work_item,
+                };
+              }
+              return task;
+            });
+            return { ...prev, tasks: updatedTasks };
+          });
+        }
+
+        // Handle run status updates
+        if (message.type === "run_status_update" && message.data?.id === activeRun?.id) {
+          console.log('[Run] Status update:', message.data.status);
+          setActiveRun((prev) => prev ? { ...prev, status: message.data.status } : prev);
+        }
       }
-    }
-  }, [lastMessage, teamId]);
+    }, [lastMessage, teamId, activeRun?.id]);
 
   const handleDeleteTeam = async () => {
     if (!confirm("Are you sure you want to delete this team?")) return;
