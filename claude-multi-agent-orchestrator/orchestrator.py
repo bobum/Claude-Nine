@@ -1158,8 +1158,8 @@ Be careful to produce valid, working code in your resolutions.
                 # REAL MODE: Execute crews with CrewAI
                 async def run_crews_parallel(crews_list):
                     """Run all crews in parallel and collect results."""
-                    ###tasks = [crew.kickoff_async() for crew in crews_list]
-                    ###results = await asyncio.gather(*tasks, return_exceptions=True)
+                    tasks = [crew.kickoff_async() for crew in crews_list]
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
                     return results
 
                 logger.info("="*80)

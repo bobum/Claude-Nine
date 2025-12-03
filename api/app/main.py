@@ -45,7 +45,8 @@ def health_check():
     return {
         "status": "ok",
         "version": "1.0.0",
-        "service": "claude-nine-api"
+        "service": "claude-nine-api",
+        "mode": "dry-run" if settings.force_dry_run else "live"
     }
 
 
