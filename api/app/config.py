@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     debug: bool = False
 
     # Orchestrator - force dry-run mode (no Anthropic API calls)
-    force_dry_run: bool = True
+    force_dry_run: bool = False
 
     # Security
     secret_key: str

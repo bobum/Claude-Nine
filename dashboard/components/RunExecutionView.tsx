@@ -192,7 +192,7 @@ export default function RunExecutionView({
                     </div>
                     <div>
                       <span className="text-gray-500">$:</span>{" "}
-                      <span className="text-yellow-400">${telemetry.token_usage?.cost_usd?.toFixed(4) ?? "0.0000"}</span>
+                      <span className="text-yellow-400">${(((telemetry.token_usage?.input_tokens ?? 0) / 1_000_000 * 3.00) + ((telemetry.token_usage?.output_tokens ?? 0) / 1_000_000 * 15.00)).toFixed(4)}</span>
                     </div>
                   </div>
                 </div>
@@ -276,21 +276,23 @@ export default function RunExecutionView({
         </div>
       )}
 
-      {/* Task Cards Grid */}
-      <div>
-        <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">
-          Tasks ({run.tasks.length})
-        </h3>
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {run.tasks.map((task, index) => (
-            <TaskCard
-              key={task.id}
-              task={task}
-              telemetry={getTelemetryForTask(task, index)}
-            />
-          ))}
+      {/* Task Cards Grid - Only show when run is completed (as summary) */}
+      {run.status === "completed" && (
+        <div>
+          <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">
+            Tasks Summary ({run.tasks.length})
+          </h3>
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {run.tasks.map((task, index) => (
+              <TaskCard
+                key={task.id}
+                task={task}
+                telemetry={getTelemetryForTask(task, index)}
+              />
+            ))}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
