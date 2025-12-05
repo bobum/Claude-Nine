@@ -813,6 +813,27 @@ Be careful to produce valid, working code in your resolutions.
         except Exception as e:
             logger.error(f"Error during cleanup: {e}")
 
+    def _update_task_status(self, work_item_id: str, status: str, error_message: Optional[str] = None):
+        """Update the status of a task in the database."""
+        if not self.team_id or not work_item_id:
+            return
+
+        try:
+            api_url = os.getenv("CLAUDE_NINE_API_URL", "http://localhost:8000")
+            payload = {"status": status}
+            if error_message:
+                payload["error_message"] = error_message
+            
+            response = requests.patch(
+                f"{api_url}/api/runs/tasks/by-work-item/{work_item_id}",
+                params=payload,
+                timeout=5
+            )
+            response.raise_for_status()
+            logger.info(f"Successfully updated task {work_item_id} to status: {status}")
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"Failed to update task status: {e}")
+
     def _update_task_agent_name(self, work_item_id: str, agent_name: str):
         """Update the agent_name for a given task in the database."""
         if not self.team_id or not work_item_id:
@@ -855,30 +876,35 @@ Be careful to produce valid, working code in your resolutions.
                     logger.info("[RESILIENT] Still waiting for tasks...")
                 return None
 
-            # Phase 1: Create integration branch from main and push to remote
-            main_branch = self.config.get('main_branch', 'main')
-            logger.info(f"Creating integration branch {self.integration_branch} from {main_branch}")
-            self.git_ops.create_branch_from_main(self.integration_branch, main_branch)
-            self.git_ops.push_branch(self.integration_branch)
-            logger.info(f"Pushed integration branch {self.integration_branch} to remote")
+            try:
+                # Phase 1: Create integration branch from main and push to remote
+                main_branch = self.config.get('main_branch', 'main')
+                logger.info(f"Creating integration branch {self.integration_branch} from {main_branch}")
+                self.git_ops.create_branch_from_main(self.integration_branch, main_branch)
+                self.git_ops.push_branch(self.integration_branch)
+                logger.info(f"Pushed integration branch {self.integration_branch} to remote")
 
-            # Phase 2: Create feature branches from integration branch
-            for feature_config in self.tasks_config:
-                agent, worktree_path = self.create_feature_agent(feature_config)
-                # Skip agents that failed to create
-                if agent is None:
-                    logger.warning(f"[RESILIENT] Skipping agent for {feature_config.get('name', 'unknown')}")
-                    continue
-                task = self.create_feature_task(agent, feature_config, worktree_path)
-                
-                # Update the task in the database with the agent's name (Fix for Issue #39)
-                work_item_id = feature_config.get('work_item_id')
-                agent_name = feature_config.get('name', 'unknown_agent')
-                self._update_task_agent_name(work_item_id, agent_name)
+                # Phase 2: Create feature branches from integration branch
+                for feature_config in self.tasks_config:
+                    agent, worktree_path = self.create_feature_agent(feature_config)
+                    # Skip agents that failed to create
+                    if agent is None:
+                        logger.warning(f"[RESILIENT] Skipping agent for {feature_config.get('name', 'unknown')}")
+                        continue
+                    task = self.create_feature_task(agent, feature_config, worktree_path)
+                    
+                    # Update the task in the database with the agent's name (Fix for Issue #39)
+                    work_item_id = feature_config.get('work_item_id')
+                    agent_name = feature_config.get('name', 'unknown_agent')
+                    self._update_task_agent_name(work_item_id, agent_name)
 
-                feature_agents.append(agent)
-                feature_tasks.append(task)
-                worktree_paths.append(worktree_path)
+                    feature_agents.append(agent)
+                    feature_tasks.append(task)
+                    worktree_paths.append(worktree_path)
+            except Exception as e:
+                logger.error(f"Error during orchestrator setup: {e}", exc_info=True)
+                raise  # Re-raise to be caught by the main try/except block
+
 
             # Note: Monitor agent removed - merge will happen in post-completion phase
             # All agents work on their tasks, then we push and merge branches after completion
@@ -942,159 +968,195 @@ Be careful to produce valid, working code in your resolutions.
             import asyncio
             import random
 
-            if self.dry_run:
-                # DRY RUN MODE: Fake the crew execution
-                logger.info("*** DRY RUN MODE: Faking crew execution ***")
-                
-                async def mock_crew_execution(crew_index, feature_config):
-                    """Simulate crew execution with delays and fake telemetry."""
-                    agent_name = feature_config.get('name', f'agent_{crew_index}')
-                    work_item_id = feature_config.get('work_item_id')
-                    task_description = feature_config.get('description', f'Implement {agent_name}')
+            try:
+                if self.dry_run:
+                    # DRY RUN MODE: Fake the crew execution
+                    logger.info("*** DRY RUN MODE: Faking crew execution ***")
                     
-                    # Simulate pending -> running transition (1-3 seconds)
-                    pending_delay = random.uniform(1.0, 3.0)
-                    logger.info(f"[MOCK] {agent_name}: pending for {pending_delay:.1f}s")
-                    await asyncio.sleep(pending_delay)
-                    
-                    # Update task status to running
-                    if work_item_id and self.team_id:
-                        try:
-                            api_url = os.getenv("CLAUDE_NINE_API_URL", "http://localhost:8000")
-                            requests.patch(
-                                f"{api_url}/api/runs/tasks/by-work-item/{work_item_id}",
-                                params={"status": "running", "agent_name": agent_name},
-                                timeout=5
-                            )
-                            logger.info(f"[MOCK] {agent_name}: status -> running")
-                        except Exception as e:
-                            logger.warning(f"[MOCK] Failed to update task status: {e}")
-                    
-                    # Simulate work (5-15 seconds) with telemetry updates
-                    work_duration = random.uniform(5.0, 15.0)
-                    logger.info(f"[MOCK] {agent_name}: working for {work_duration:.1f}s")
-                    
-                    elapsed = 0.0
-                    total_input_tokens = 0
-                    total_output_tokens = 0
-                    files_read = []
-                    files_written = []
-                    tool_calls = []
-                    git_activities = []
-                    activity_logs = []
-                    
-                    # Simulated actions to cycle through
-                    simulated_actions = [
-                        ("Analyzing codebase...", None),
-                        ("Reading file: src/index.ts", "git_read_file"),
-                        ("Calling claude-sonnet-4-5...", None),
-                        ("Generating response...", None),
-                        ("Writing file: src/feature.ts", "git_write_file"),
-                        ("Running tests...", "run_tests"),
-                        ("Committing changes...", "git_commit"),
-                    ]
-                    action_index = 0
-                    
-                    while elapsed < work_duration:
-                        await asyncio.sleep(2.0)
-                        elapsed += 2.0
+                    async def mock_crew_execution(crew_index, feature_config):
+                        """Simulate crew execution with delays and fake telemetry."""
+                        agent_name = feature_config.get('name', f'agent_{crew_index}')
+                        work_item_id = feature_config.get('work_item_id')
+                        task_description = feature_config.get('description', f'Implement {agent_name}')
                         
-                        # Use centralized mock token generator
-                        total_input_tokens, total_output_tokens, total_tokens = MockTelemetry.get_tokens()
+                        # Simulate pending -> running transition (1-3 seconds)
+                        pending_delay = random.uniform(1.0, 3.0)
+                        logger.info(f"[MOCK] {agent_name}: pending for {pending_delay:.1f}s")
+                        await asyncio.sleep(pending_delay)
                         
-                        # No streaming tokens in mock mode
-                        streaming_tokens = None
+                        # Update task status to running
+                        if work_item_id and self.team_id:
+                            self._update_task_status(work_item_id, "running")
                         
-                        # Cycle through simulated actions
-                        current_action, tool_in_progress = simulated_actions[action_index % len(simulated_actions)]
-                        action_index += 1
+                        # Simulate work (5-15 seconds) with telemetry updates
+                        work_duration = random.uniform(5.0, 15.0)
+                        logger.info(f"[MOCK] {agent_name}: working for {work_duration:.1f}s")
                         
-                        # Simulate file operations
-                        if "Reading" in current_action:
-                            fake_file = f"src/file_{random.randint(1,5)}.ts"
-                            if fake_file not in files_read:
-                                files_read.append(fake_file)
-                        elif "Writing" in current_action:
-                            fake_file = f"src/output_{random.randint(1,3)}.ts"
-                            if fake_file not in files_written:
-                                files_written.append(fake_file)
+                        elapsed = 0.0
+                        total_input_tokens = 0
+                        total_output_tokens = 0
+                        files_read = []
+                        files_written = []
+                        tool_calls = []
+                        git_activities = []
+                        activity_logs = []
                         
-                        # Simulate tool calls
-                        if tool_in_progress:
-                            tool_calls.append({
+                        # Simulated actions to cycle through
+                        simulated_actions = [
+                            ("Analyzing codebase...", None),
+                            ("Reading file: src/index.ts", "git_read_file"),
+                            ("Calling claude-sonnet-4-5...", None),
+                            ("Generating response...", None),
+                            ("Writing file: src/feature.ts", "git_write_file"),
+                            ("Running tests...", "run_tests"),
+                            ("Committing changes...", "git_commit"),
+                        ]
+                        action_index = 0
+                        
+                        while elapsed < work_duration:
+                            await asyncio.sleep(2.0)
+                            elapsed += 2.0
+                            
+                            # Use centralized mock token generator
+                            total_input_tokens, total_output_tokens, total_tokens = MockTelemetry.get_tokens()
+                            
+                            # No streaming tokens in mock mode
+                            streaming_tokens = None
+                            
+                            # Cycle through simulated actions
+                            current_action, tool_in_progress = simulated_actions[action_index % len(simulated_actions)]
+                            action_index += 1
+                            
+                            # Simulate file operations
+                            if "Reading" in current_action:
+                                fake_file = f"src/file_{random.randint(1,5)}.ts"
+                                if fake_file not in files_read:
+                                    files_read.append(fake_file)
+                            elif "Writing" in current_action:
+                                fake_file = f"src/output_{random.randint(1,3)}.ts"
+                                if fake_file not in files_written:
+                                    files_written.append(fake_file)
+                            
+                            # Simulate tool calls
+                            if tool_in_progress:
+                                tool_calls.append({
+                                    "timestamp": datetime.now().isoformat(),
+                                    "tool": tool_in_progress,
+                                    "arguments": {"path": f"src/file_{random.randint(1,5)}.ts"},
+                                    "result": "Success"
+                                })
+                                # Keep only last 10
+                                tool_calls = tool_calls[-10:]
+                            
+                            # Add activity log
+                            activity_logs.append({
                                 "timestamp": datetime.now().isoformat(),
-                                "tool": tool_in_progress,
-                                "arguments": {"path": f"src/file_{random.randint(1,5)}.ts"},
-                                "result": "Success"
-                            })
-                            # Keep only last 10
-                            tool_calls = tool_calls[-10:]
-                        
-                        # Add activity log
-                        activity_logs.append({
-                            "timestamp": datetime.now().isoformat(),
-                            "level": "info",
-                            "message": f"[MOCK] tokens: {total_tokens} (alternating 66666/0)",
-                            "source": "llm",
-                            "agent_name": agent_name
-                        })
-                        activity_logs.append({
-                            "timestamp": datetime.now().isoformat(),
-                            "level": "info",
-                            "message": current_action,
-                            "source": "orchestrator",
-                            "agent_name": agent_name
-                        })
-                        # Keep only last 50
-                        activity_logs = activity_logs[-50:]
-                        
-                        # Simulate git activity occasionally
-                        if random.random() < 0.2 and elapsed > 3:
-                            git_activities.append({
-                                "operation": random.choice(["commit", "branch_create"]),
-                                "branch": f"feature/{agent_name.lower().replace(' ', '-')}",
-                                "message": f"WIP: {task_description[:30]}...",
-                                "files_changed": random.randint(1, 5),
-                                "timestamp": datetime.now().isoformat(),
+                                "level": "info",
+                                "message": f"[MOCK] tokens: {total_tokens} (alternating 66666/0)",
+                                "source": "llm",
                                 "agent_name": agent_name
                             })
-                            # Keep only last 10
-                            git_activities = git_activities[-10:]
+                            activity_logs.append({
+                                "timestamp": datetime.now().isoformat(),
+                                "level": "info",
+                                "message": current_action,
+                                "source": "orchestrator",
+                                "agent_name": agent_name
+                            })
+                            # Keep only last 50
+                            activity_logs = activity_logs[-50:]
+                            
+                            # Simulate git activity occasionally
+                            if random.random() < 0.2 and elapsed > 3:
+                                git_activities.append({
+                                    "operation": random.choice(["commit", "branch_create"]),
+                                    "branch": f"feature/{agent_name.lower().replace(' ', '-')}",
+                                    "message": f"WIP: {task_description[:30]}...",
+                                    "files_changed": random.randint(1, 5),
+                                    "timestamp": datetime.now().isoformat(),
+                                    "agent_name": agent_name
+                                })
+                                # Keep only last 10
+                                git_activities = git_activities[-10:]
+                            
+                            # Send fake telemetry with all enhanced fields
+                            if self.team_id:
+                                try:
+                                    api_url = os.getenv("CLAUDE_NINE_API_URL", "http://localhost:8000")
+                                    telemetry_data = {
+                                        "team_id": self.team_id,
+                                        "agent_name": agent_name,
+                                        "status": "working",
+                                        "current_task": task_description[:100],
+                                        "current_action": current_action,
+                                        "process_metrics": {
+                                            "pid": os.getpid(),
+                                            "cpu_percent": round(random.uniform(15.0, 45.0), 1),
+                                            "memory_mb": round(random.uniform(200.0, 500.0), 1),
+                                            "threads": 4,
+                                            "status": "running"
+                                        },
+                                        "token_usage": {
+                                            "model": "claude-sonnet-4-5",
+                                            "input_tokens": total_input_tokens,
+                                            "output_tokens": total_output_tokens,
+                                            "total_tokens": total_tokens,
+                                            "streaming_tokens": streaming_tokens,
+                                            "total_tokens_with_streaming": None
+                                        },
+                                        "files_read": files_read[-10:],
+                                        "files_written": files_written[-10:],
+                                        "tool_calls": tool_calls[-10:],
+                                        "tool_in_progress": tool_in_progress,
+                                        "git_activities": git_activities,
+                                        "activity_logs": activity_logs,
+                                        "timestamp": datetime.now().isoformat(),
+                                        "heartbeat": True,
+                                        "event_bus_connected": True  # Simulate as if event bus is connected
+                                    }
+                                    requests.post(
+                                        f"{api_url}/api/telemetry/agent/{agent_name}",
+                                        json=telemetry_data,
+                                        timeout=5
+                                    )
+                                except Exception as e:
+                                    logger.warning(f"[MOCK] Failed to send telemetry: {e}")
                         
-                        # Send fake telemetry with all enhanced fields
+                        # Send final "completed" telemetry - use last token values
+                        final_input, final_output, final_total = MockTelemetry.get_tokens()
                         if self.team_id:
                             try:
                                 api_url = os.getenv("CLAUDE_NINE_API_URL", "http://localhost:8000")
                                 telemetry_data = {
                                     "team_id": self.team_id,
                                     "agent_name": agent_name,
-                                    "status": "working",
+                                    "status": "completed",
                                     "current_task": task_description[:100],
-                                    "current_action": current_action,
+                                    "current_action": "Task completed successfully",
                                     "process_metrics": {
                                         "pid": os.getpid(),
-                                        "cpu_percent": round(random.uniform(15.0, 45.0), 1),
-                                        "memory_mb": round(random.uniform(200.0, 500.0), 1),
+                                        "cpu_percent": 2.0,
+                                        "memory_mb": round(random.uniform(150.0, 200.0), 1),
                                         "threads": 4,
                                         "status": "running"
                                     },
                                     "token_usage": {
                                         "model": "claude-sonnet-4-5",
-                                        "input_tokens": total_input_tokens,
-                                        "output_tokens": total_output_tokens,
-                                        "total_tokens": total_tokens,
-                                        "streaming_tokens": streaming_tokens,
+                                        "input_tokens": final_input,
+                                        "output_tokens": final_output,
+                                        "total_tokens": final_total,
+                                        "streaming_tokens": None,
                                         "total_tokens_with_streaming": None
                                     },
                                     "files_read": files_read[-10:],
                                     "files_written": files_written[-10:],
                                     "tool_calls": tool_calls[-10:],
-                                    "tool_in_progress": tool_in_progress,
+                                    "tool_in_progress": None,
                                     "git_activities": git_activities,
                                     "activity_logs": activity_logs,
                                     "timestamp": datetime.now().isoformat(),
                                     "heartbeat": True,
-                                    "event_bus_connected": True  # Simulate as if event bus is connected
+                                    "event_bus_connected": True
                                 }
                                 requests.post(
                                     f"{api_url}/api/telemetry/agent/{agent_name}",
@@ -1102,63 +1164,18 @@ Be careful to produce valid, working code in your resolutions.
                                     timeout=5
                                 )
                             except Exception as e:
-                                logger.warning(f"[MOCK] Failed to send telemetry: {e}")
-                    
-                    # Send final "completed" telemetry - use last token values
-                    final_input, final_output, final_total = MockTelemetry.get_tokens()
-                    if self.team_id:
-                        try:
-                            api_url = os.getenv("CLAUDE_NINE_API_URL", "http://localhost:8000")
-                            telemetry_data = {
-                                "team_id": self.team_id,
-                                "agent_name": agent_name,
-                                "status": "completed",
-                                "current_task": task_description[:100],
-                                "current_action": "Task completed successfully",
-                                "process_metrics": {
-                                    "pid": os.getpid(),
-                                    "cpu_percent": 2.0,
-                                    "memory_mb": round(random.uniform(150.0, 200.0), 1),
-                                    "threads": 4,
-                                    "status": "running"
-                                },
-                                "token_usage": {
-                                    "model": "claude-sonnet-4-5",
-                                    "input_tokens": final_input,
-                                    "output_tokens": final_output,
-                                    "total_tokens": final_total,
-                                    "streaming_tokens": None,
-                                    "total_tokens_with_streaming": None
-                                },
-                                "files_read": files_read[-10:],
-                                "files_written": files_written[-10:],
-                                "tool_calls": tool_calls[-10:],
-                                "tool_in_progress": None,
-                                "git_activities": git_activities,
-                                "activity_logs": activity_logs,
-                                "timestamp": datetime.now().isoformat(),
-                                "heartbeat": True,
-                                "event_bus_connected": True
-                            }
-                            requests.post(
-                                f"{api_url}/api/telemetry/agent/{agent_name}",
-                                json=telemetry_data,
-                                timeout=5
-                            )
-                        except Exception as e:
-                            logger.warning(f"[MOCK] Failed to send final telemetry: {e}")
-                    
-                    logger.info(f"[MOCK] {agent_name}: completed")
-                    return f"Mock result for {agent_name}"
+                                logger.warning(f"[MOCK] Failed to send final telemetry: {e}")
+                        
+                        logger.info(f"[MOCK] {agent_name}: completed")
+                        return f"Mock result for {agent_name}"
 
-                async def run_mock_parallel():
-                    """Run all mock crews in parallel."""
-                    tasks = [mock_crew_execution(i, self.tasks_config[i]) for i in range(len(crews))]
-                    return await asyncio.gather(*tasks, return_exceptions=True)
+                    async def run_mock_parallel():
+                        """Run all mock crews in parallel."""
+                        tasks = [mock_crew_execution(i, self.tasks_config[i]) for i in range(len(crews))]
+                        return await asyncio.gather(*tasks, return_exceptions=True)
 
-                # Execute mock crews
-                logger.info("Starting mock parallel execution...")
-                try:
+                    # Execute mock crews
+                    logger.info("Starting mock parallel execution...")
                     try:
                         loop = asyncio.get_running_loop()
                         import concurrent.futures
@@ -1173,23 +1190,19 @@ Be careful to produce valid, working code in your resolutions.
                         else:
                             logger.info(f"Mock crew {idx} completed: {result}")
 
-                except Exception as e:
-                    logger.error(f"Error during mock execution: {e}")
-                    raise
+                else:
+                    # REAL MODE: Execute crews with CrewAI
+                    async def run_crews_parallel(crews_list):
+                        """Run all crews in parallel and collect results."""
+                        tasks = [crew.kickoff_async() for crew in crews_list]
+                        results = await asyncio.gather(*tasks, return_exceptions=True)
+                        return results
 
-            else:
-                # REAL MODE: Execute crews with CrewAI
-                async def run_crews_parallel(crews_list):
-                    """Run all crews in parallel and collect results."""
-                    tasks = [crew.kickoff_async() for crew in crews_list]
-                    results = await asyncio.gather(*tasks, return_exceptions=True)
-                    return results
-
-                logger.info("="*80)
-                logger.info("*** CONTACTING CREW/ANTHROPIC NOW ***")
-                logger.info("="*80)
-                logger.info("Starting parallel crew execution...")
-                try:
+                    logger.info("="*80)
+                    logger.info("*** CONTACTING CREW/ANTHROPIC NOW ***")
+                    logger.info("="*80)
+                    logger.info("Starting parallel crew execution...")
+                    
                     try:
                         loop = asyncio.get_running_loop()
                         import concurrent.futures
@@ -1201,12 +1214,22 @@ Be careful to produce valid, working code in your resolutions.
                     for idx, result in enumerate(results):
                         if isinstance(result, Exception):
                             logger.error(f"Crew {idx} failed with error: {result}")
+                            # Update task status to failed
+                            work_item_id = self.tasks_config[idx].get('work_item_id')
+                            self._update_task_status(work_item_id, "failed", str(result))
                         else:
                             logger.info(f"Crew {idx} completed successfully")
-
-                except Exception as e:
-                    logger.error(f"Error during parallel crew execution: {e}")
-                    raise
+                            # Update task status to completed
+                            work_item_id = self.tasks_config[idx].get('work_item_id')
+                            self._update_task_status(work_item_id, "completed")
+            
+            except Exception as e:
+                logger.error(f"Error during parallel crew execution: {e}", exc_info=True)
+                # Mark all tasks as failed
+                for task_config in self.tasks_config:
+                    work_item_id = task_config.get('work_item_id')
+                    self._update_task_status(work_item_id, "failed", str(e))
+                raise  # Re-raise the exception to be caught by the main try/except block
 
             logger.info("="*80)
             logger.info("All feature tasks completed")
