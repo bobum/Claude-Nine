@@ -1,37 +1,22 @@
-from pydantic_settings import BaseSettings
-from functools import lru_cache
+"""
+API Configuration - Re-exports from shared config module.
 
+This module maintains backward compatibility for existing imports:
+    from .config import settings
+    from .config import Settings, get_settings
 
-class Settings(BaseSettings):
-    """Application settings loaded from environment variables"""
+All configuration is now managed in the shared.config module.
+"""
 
-    # Database
-    database_url: str
+import sys
+from pathlib import Path
 
-    # API
-    api_host: str = "0.0.0.0"
-    api_port: int = 8000
-    debug: bool = False
+# Add project root to path so we can import shared module
+project_root = Path(__file__).parent.parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
-    # Orchestrator - force dry-run mode (no Anthropic API calls)
-    force_dry_run: bool = False
+# Re-export from shared config
+from shared.config import Settings, get_settings, settings
 
-    # Security
-    secret_key: str
-
-    # External APIs
-    anthropic_api_key: str = ""
-    ado_pat: str = ""
-
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
-
-
-@lru_cache()
-def get_settings():
-    """Get cached settings instance"""
-    return Settings()
-
-
-settings = get_settings()
+__all__ = ["Settings", "get_settings", "settings"]

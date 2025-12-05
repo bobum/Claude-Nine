@@ -25,6 +25,13 @@ from typing import List, Dict, Any, Tuple, Optional
 from datetime import datetime
 from pathlib import Path
 
+# Add project root to path for shared module import
+_project_root = Path(__file__).parent.parent
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
+
+from shared.config import settings as shared_settings
+
 from crewai import Agent, Task, Crew, Process, LLM
 from git_tools import create_git_tools
 from git_operations import GitOperations
@@ -98,23 +105,31 @@ class MultiAgentOrchestrator:
         Initialize the orchestrator.
 
         Args:
-            config_path: Path to configuration file
+            config_path: Path to configuration file (for task-specific overrides)
             tasks_path: Path to tasks definition file
             team_id: Team ID for API integration (optional)
             headless_mode: If True, write telemetry to files instead of API
             dry_run: If True, use mock LLM responses instead of real API calls
         """
-        self.dry_run = dry_run
-        
+        # Dry run is enabled if: explicitly requested OR forced via config OR no valid API key
+        self.dry_run = dry_run or shared_settings.effective_dry_run
+
         # Log PID immediately at startup
         logger.info(f"=" * 60)
         logger.info(f"ORCHESTRATOR STARTING - PID: {os.getpid()}")
         logger.info(f"=" * 60)
-        
-        if dry_run:
-            logger.info("DRY RUN MODE: Using mock LLM responses (no API credits consumed)")
+
+        if self.dry_run:
+            if shared_settings.force_dry_run:
+                logger.info("DRY RUN MODE (forced via FORCE_DRY_RUN setting)")
+            elif not shared_settings.is_api_key_configured:
+                logger.info("DRY RUN MODE (no valid API key configured)")
+            else:
+                logger.info("DRY RUN MODE: Using mock LLM responses (no API credits consumed)")
         else:
             logger.warning("LIVE MODE: Using real Anthropic API (credits will be consumed)")
+
+        # Load task-specific config (for overrides like main_branch per team)
         self.config = self._load_config(config_path)
         self.tasks_config = self._load_tasks(tasks_path)
         self.repo_path = os.getcwd()
@@ -148,20 +163,14 @@ class MultiAgentOrchestrator:
         if headless_mode:
             logger.info("Running in headless mode - telemetry will be written to files")
 
-        # Set up API key - only needed for real mode
+        # Set up API key - use shared settings (validated by Pydantic)
         if not self.dry_run:
-            env_api_key = os.getenv('ANTHROPIC_API_KEY')
-            config_api_key = self.config.get('anthropic_api_key', '')
-
-            if env_api_key and env_api_key.startswith('sk-'):
-                logger.info(f"Using ANTHROPIC_API_KEY from environment: {env_api_key[:20]}...")
-            elif config_api_key and config_api_key.startswith('sk-'):
-                os.environ['ANTHROPIC_API_KEY'] = config_api_key
-                logger.info(f"Set ANTHROPIC_API_KEY from config: {config_api_key[:20]}...")
-            elif env_api_key:
-                logger.warning(f"ANTHROPIC_API_KEY in env doesn't look valid: {env_api_key[:20]}...")
+            if shared_settings.is_api_key_configured:
+                # Ensure it's in the environment for CrewAI/LangChain
+                os.environ['ANTHROPIC_API_KEY'] = shared_settings.anthropic_api_key
+                logger.info(f"Using ANTHROPIC_API_KEY from shared config: {shared_settings.anthropic_api_key[:20]}...")
             else:
-                logger.error("ANTHROPIC_API_KEY not found in environment or config!")
+                logger.error("ANTHROPIC_API_KEY not configured! Set it in api/.env or environment.")
         else:
             logger.info("DRY RUN MODE: Skipping API key setup - will use mock execution")
 
@@ -176,44 +185,46 @@ class MultiAgentOrchestrator:
         """
         Load configuration from API endpoint or YAML file (fallback).
 
-        Fetches configuration from the Claude-Nine API to avoid Windows encoding issues
-        with API keys in YAML files. Falls back to YAML file if API is not available.
+        Uses shared settings as the base, with optional overrides from API or YAML file.
+        This allows per-team customization while maintaining consistent defaults.
         """
-        # Try to fetch config from API first
+        # Base config from shared settings
+        base_config = {
+            'main_branch': shared_settings.main_branch,
+            'check_interval': shared_settings.check_interval,
+            'anthropic_api_key': shared_settings.anthropic_api_key,
+        }
+
+        # Try to fetch additional config from API first
         try:
-            api_url = os.getenv('CLAUDE_NINE_API_URL', 'http://localhost:8000')
+            api_url = shared_settings.claude_nine_api_url
             response = requests.get(f"{api_url}/api/settings/orchestrator/config", timeout=5)
 
             if response.status_code == 200:
-                config = response.json()
-                logger.info(f"Loaded configuration from API endpoint: {api_url}")
-                return config
+                api_config = response.json()
+                logger.info(f"Loaded configuration overrides from API endpoint: {api_url}")
+                # Merge API config with base (API takes precedence)
+                base_config.update(api_config)
+                return base_config
             else:
                 logger.warning(f"API returned status {response.status_code}, falling back to file")
         except requests.exceptions.RequestException as e:
             logger.warning(f"Could not fetch config from API ({e}), falling back to file")
 
-        # Fallback to YAML file
+        # Fallback to YAML file for additional overrides
         try:
             with open(config_path, 'r', encoding='utf-8') as f:
-                config = yaml.safe_load(f)
-            logger.info(f"Loaded configuration from {config_path}")
-            return config
+                file_config = yaml.safe_load(f) or {}
+            logger.info(f"Loaded configuration overrides from {config_path}")
+            # Merge file config with base (file takes precedence)
+            base_config.update(file_config)
+            return base_config
         except FileNotFoundError:
-            logger.warning(f"Config file {config_path} not found, using defaults")
-            return {
-                'main_branch': 'main',
-                'check_interval': 60,
-                'anthropic_api_key': os.getenv('ANTHROPIC_API_KEY', '')
-            }
+            logger.info(f"Config file {config_path} not found, using shared settings")
+            return base_config
         except Exception as e:
             logger.error(f"Error loading config from file: {e}")
-            logger.warning("Using environment variable for API key")
-            return {
-                'main_branch': 'main',
-                'check_interval': 60,
-                'anthropic_api_key': os.getenv('ANTHROPIC_API_KEY', '')
-            }
+            return base_config
 
     def _load_tasks(self, tasks_path: str) -> List[Dict[str, Any]]:
         """Load tasks from YAML file. Returns empty list on error to keep orchestrator alive."""
@@ -306,7 +317,7 @@ Always make commits with descriptive messages. Work independently and focus on y
             # Create LLM - always use real LLM (dry-run mode takes a different path entirely)
             llm = LLM(
                 model="anthropic/claude-sonnet-4-5-20250929",
-                api_key=os.getenv("ANTHROPIC_API_KEY"),
+                api_key=shared_settings.anthropic_api_key,
                 max_tokens=4096
             )
 
@@ -477,7 +488,7 @@ Guidelines for resolution:
         # Create LLM - always use real LLM (dry-run mode takes a different path entirely)
         llm = LLM(
             model="anthropic/claude-sonnet-4-5-20250929",
-            api_key=os.getenv("ANTHROPIC_API_KEY"),
+            api_key=shared_settings.anthropic_api_key,
             max_tokens=8192
         )
 
@@ -819,7 +830,7 @@ Be careful to produce valid, working code in your resolutions.
             return
 
         try:
-            api_url = os.getenv("CLAUDE_NINE_API_URL", "http://localhost:8000")
+            api_url = shared_settings.claude_nine_api_url
             payload = {"status": status}
             if error_message:
                 payload["error_message"] = error_message
@@ -840,7 +851,7 @@ Be careful to produce valid, working code in your resolutions.
             return
 
         try:
-            api_url = os.getenv("CLAUDE_NINE_API_URL", "http://localhost:8000")
+            api_url = shared_settings.claude_nine_api_url
             response = requests.patch(
                 f"{api_url}/api/runs/tasks/by-work-item/{work_item_id}",
                 params={"agent_name": agent_name},
@@ -920,7 +931,7 @@ Be careful to produce valid, working code in your resolutions.
                     agent_names = [fc.get("name", f"Agent-{idx}") for idx, fc in enumerate(self.tasks_config)]
 
                     # Initialize telemetry collector using global function
-                    api_url = os.getenv("CLAUDE_NINE_API_URL", "http://localhost:8000")
+                    api_url = shared_settings.claude_nine_api_url
                     telemetry_output_dir = self.workspace_dir / "telemetry"
                     collector = initialize_telemetry(
                         team_id=self.team_id,
@@ -1082,7 +1093,7 @@ Be careful to produce valid, working code in your resolutions.
                             # Send fake telemetry with all enhanced fields
                             if self.team_id:
                                 try:
-                                    api_url = os.getenv("CLAUDE_NINE_API_URL", "http://localhost:8000")
+                                    api_url = shared_settings.claude_nine_api_url
                                     telemetry_data = {
                                         "team_id": self.team_id,
                                         "agent_name": agent_name,
@@ -1126,7 +1137,7 @@ Be careful to produce valid, working code in your resolutions.
                         final_input, final_output, final_total = MockTelemetry.get_tokens()
                         if self.team_id:
                             try:
-                                api_url = os.getenv("CLAUDE_NINE_API_URL", "http://localhost:8000")
+                                api_url = shared_settings.claude_nine_api_url
                                 telemetry_data = {
                                     "team_id": self.team_id,
                                     "agent_name": agent_name,

@@ -36,3 +36,4 @@ activate.sh
 # Claude Code workspace (keep user settings private, share commands)
 .claude/
 !.claude/commands/
+__pycache__/

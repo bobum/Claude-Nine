@@ -370,24 +370,47 @@ SECRET_KEY=$(python -c "import secrets; print(secrets.token_urlsafe(32))" 2>/dev
 # Create .env file
 echo "Creating api/.env configuration..."
 cat > .env << EOF
-# Claude-Nine API Configuration (Local Setup)
+# Claude-Nine Unified Configuration
+# This file is loaded by both the API and Orchestrator via shared.config
 
-# Database - SQLite (no cloud database needed)
+# =============================================================================
+# Database
+# =============================================================================
 DATABASE_URL=sqlite:///./claude_nine.db
 
+# =============================================================================
 # Security
+# =============================================================================
 SECRET_KEY=$SECRET_KEY
 
-# Anthropic API Key (required for Claude AI)
+# =============================================================================
+# Anthropic API (Required for Claude AI)
+# =============================================================================
 ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY
 
+# =============================================================================
 # API Server Settings
+# =============================================================================
 API_HOST=0.0.0.0
 API_PORT=8000
 DEBUG=True
 
+# =============================================================================
+# Orchestrator Settings
+# =============================================================================
+# Force dry-run mode (mock LLM, no API credits consumed)
+FORCE_DRY_RUN=False
+
+# Default git branch for orchestrator operations
+MAIN_BRANCH=main
+
+# Health check interval in seconds
+CHECK_INTERVAL=60
+
+# =============================================================================
 # Integration Credentials (Optional)
-# You can also configure these via the Settings page in the web UI
+# Configure these here or via the Settings page in the web UI
+# =============================================================================
 
 # Azure DevOps
 AZURE_DEVOPS_URL=$AZURE_DEVOPS_URL
