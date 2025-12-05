@@ -716,14 +716,50 @@ fi
 cat > stop.sh << 'EOF'
 #!/bin/bash
 
-# Stop Claude-Nine
+# Stop Claude-Nine (API, Dashboard, AND Orchestrator subprocesses)
+#
+# IMPORTANT: Always use this script to stop Claude-Nine, especially during debugging.
+# Orchestrator subprocesses will continue running if you only stop the API!
 
 # Colors for output
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+RED='\033[0;31m'
 NC='\033[0m' # No Color
 
 echo -e "${YELLOW}Stopping Claude-Nine...${NC}"
+echo ""
+
+# Kill Orchestrator subprocesses first (from PID file)
+PID_FILE="logs/orchestrator.pids"
+if [ -f "$PID_FILE" ]; then
+    echo "Stopping orchestrator subprocess(es)..."
+    KILLED_COUNT=0
+    while IFS=: read -r pid team_id; do
+        if [ ! -z "$pid" ]; then
+            # Check if process is running
+            if kill -0 "$pid" 2>/dev/null; then
+                echo "  Killing orchestrator PID $pid (team: $team_id)..."
+                kill "$pid" 2>/dev/null
+                sleep 0.5
+                # Force kill if still running
+                if kill -0 "$pid" 2>/dev/null; then
+                    kill -9 "$pid" 2>/dev/null
+                fi
+                ((KILLED_COUNT++))
+            fi
+        fi
+    done < "$PID_FILE"
+    # Clear the PID file
+    > "$PID_FILE"
+    if [ $KILLED_COUNT -gt 0 ]; then
+        echo -e "  ${GREEN}✓${NC} Killed $KILLED_COUNT orchestrator process(es)"
+    else
+        echo "  No running orchestrator processes found"
+    fi
+else
+    echo "No orchestrator PID file found"
+fi
 echo ""
 
 # Kill API server
@@ -756,6 +792,9 @@ fi
 
 echo ""
 echo -e "${GREEN}✓ Claude-Nine stopped${NC}"
+echo ""
+echo -e "${YELLOW}Note:${NC} If you were debugging, make sure to run ./stop.sh before"
+echo "restarting to ensure no stale orchestrator processes are left running."
 EOF
 
 chmod +x stop.sh
