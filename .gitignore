@@ -33,5 +33,6 @@ activate.sh
 !api/tests/test_*.py
 !claude-multi-agent-orchestrator/tests/test_*.py
 
-# Claude Code workspace
+# Claude Code workspace (keep user settings private, share commands)
 .claude/
+!.claude/commands/
