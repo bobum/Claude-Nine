@@ -216,6 +216,49 @@ else
 fi
 
 echo ""
+
+# Check Redis/Docker availability (for Celery task queue)
+REDIS_METHOD=""
+echo ""
+echo -e "${BLUE}Checking Redis availability (for task queue)...${NC}"
+
+# Check if Redis is already running
+if command_exists redis-cli && redis-cli ping >/dev/null 2>&1; then
+    echo -e "${GREEN}✓${NC} Redis is already running on localhost"
+    REDIS_METHOD="system"
+# Check if Docker is available
+elif command_exists docker; then
+    # Check if Docker daemon is running
+    if docker info >/dev/null 2>&1; then
+        echo -e "${GREEN}✓${NC} Docker found - will use containerized Redis"
+        REDIS_METHOD="docker"
+
+        # Pull Redis image
+        echo "  Pulling Redis image..."
+        docker pull redis:alpine -q >/dev/null 2>&1 || docker pull redis:alpine
+        echo -e "${GREEN}  ✓${NC} Redis image ready"
+    else
+        echo -e "${YELLOW}⚠${NC} Docker found but daemon not running"
+    fi
+fi
+
+if [ -z "$REDIS_METHOD" ]; then
+    echo -e "${YELLOW}⚠${NC} No Redis detected"
+    echo ""
+    echo "  Claude-Nine uses Redis for the task queue (Celery)."
+    echo "  Please do ONE of the following:"
+    echo ""
+    echo "  Option 1: Install Docker (recommended)"
+    echo "    https://docs.docker.com/get-docker/"
+    echo ""
+    echo "  Option 2: Install Redis directly"
+    echo "    - Windows: Use WSL2 or Docker"
+    echo "    - macOS: brew install redis"
+    echo "    - Linux: sudo apt install redis-server"
+    echo ""
+    echo -e "  ${YELLOW}Installation will continue, but start.sh will need Redis.${NC}"
+fi
+
 echo -e "${GREEN}All prerequisites met!${NC}"
 echo ""
 
@@ -386,6 +429,10 @@ API_HOST=0.0.0.0
 API_PORT=8000
 DEBUG=True
 
+# Celery / Redis Task Queue
+CELERY_BROKER_URL=redis://localhost:6379/0
+CELERY_RESULT_BACKEND=redis://localhost:6379/0
+
 # Integration Credentials (Optional)
 # You can also configure these via the Settings page in the web UI
 
@@ -509,179 +556,12 @@ else
     ACTIVATE_CMD="source venv/bin/activate"
 fi
 
-# Create start script
-cat > start.sh << EOF
-#!/bin/bash
 
-# Start Claude-Nine (API + Dashboard)
+# Scripts are already in the repo with Redis + Celery support
+chmod +x start.sh stop.sh 2>/dev/null || true
+echo -e "${GREEN}✓${NC} start.sh ready - Run Claude-Nine with: ./start.sh"
+echo -e "${GREEN}✓${NC} stop.sh ready - Stop Claude-Nine with: ./stop.sh"
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
-
-echo -e "\${GREEN}Starting Claude-Nine...\${NC}"
-echo ""
-
-# Activate virtual environment
-echo "Activating Python virtual environment..."
-$ACTIVATE_CMD
-
-# Create logs directory
-mkdir -p logs
-
-# Start API in background with logging
-echo "Starting API server on http://localhost:8000..."
-cd api
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 > ../logs/api.log 2>&1 &
-API_PID=\$!
-cd ..
-
-# Check if API process started
-if ! kill -0 \$API_PID 2>/dev/null; then
-    echo -e "\${RED}✗ Failed to start API process\${NC}"
-    echo "Check logs/api.log for details"
-    exit 1
-fi
-
-echo "API process started (PID: \$API_PID), checking health..."
-
-# Wait for API to be ready (check health endpoint)
-MAX_WAIT=30
-WAIT_COUNT=0
-API_READY=false
-
-while [ \$WAIT_COUNT -lt \$MAX_WAIT ]; do
-    # Check if process is still running
-    if ! kill -0 \$API_PID 2>/dev/null; then
-        echo -e "\${RED}✗ API process died during startup\${NC}"
-        echo "Last 20 lines of logs/api.log:"
-        tail -n 20 logs/api.log
-        exit 1
-    fi
-
-    # Try to connect to health endpoint
-    if curl -s http://localhost:8000/health > /dev/null 2>&1; then
-        API_READY=true
-        break
-    fi
-
-    sleep 1
-    WAIT_COUNT=\$((WAIT_COUNT + 1))
-    echo -n "."
-done
-
-echo ""
-
-if [ "\$API_READY" = true ]; then
-    echo -e "\${GREEN}✓ API server is ready!\${NC}"
-else
-    echo -e "\${RED}✗ API server failed to respond after \${MAX_WAIT}s\${NC}"
-    echo "The process is running but not responding. Check logs/api.log:"
-    echo ""
-    tail -n 30 logs/api.log
-    echo ""
-    echo -e "\${YELLOW}Killing API process...\${NC}"
-    kill \$API_PID 2>/dev/null
-    exit 1
-fi
-
-echo ""
-
-# Validate and prepare Dashboard
-echo "Checking Dashboard build..."
-cd dashboard
-
-# Always delete .next to force rebuild (ensures code changes are picked up)
-echo "Removing old dashboard build..."
-rm -rf .next
-
-# Rebuild dashboard
-echo "Building dashboard (this may take a minute)..."
-if npm run build > ../logs/dashboard-build.log 2>&1; then
-    echo -e "\${GREEN}✓ Dashboard built successfully\${NC}"
-else
-    echo -e "\${RED}✗ Dashboard build failed\${NC}"
-    echo "Check logs/dashboard-build.log for details"
-    kill \$API_PID 2>/dev/null
-    exit 1
-fi
-
-# Start Dashboard in production mode
-echo "Starting Dashboard on http://localhost:3001..."
-PORT=3001 npm start > ../logs/dashboard.log 2>&1 &
-DASHBOARD_PID=\$!
-cd ..
-
-# Check if Dashboard process started
-if ! kill -0 \$DASHBOARD_PID 2>/dev/null; then
-    echo -e "\${RED}✗ Failed to start Dashboard process\${NC}"
-    echo "Check logs/dashboard.log for details"
-    kill \$API_PID 2>/dev/null
-    exit 1
-fi
-
-echo "Dashboard process started (PID: \$DASHBOARD_PID), waiting for it to be ready..."
-
-# Wait for Dashboard to be ready
-MAX_WAIT=30
-WAIT_COUNT=0
-DASHBOARD_READY=false
-
-while [ \$WAIT_COUNT -lt \$MAX_WAIT ]; do
-    if ! kill -0 \$DASHBOARD_PID 2>/dev/null; then
-        echo -e "\${RED}✗ Dashboard process died during startup\${NC}"
-        echo "Last 20 lines of logs/dashboard.log:"
-        tail -n 20 logs/dashboard.log
-        kill \$API_PID 2>/dev/null
-        exit 1
-    fi
-
-    if curl -s http://localhost:3001 > /dev/null 2>&1; then
-        DASHBOARD_READY=true
-        break
-    fi
-
-    sleep 1
-    WAIT_COUNT=\$((WAIT_COUNT + 1))
-    echo -n "."
-done
-
-echo ""
-
-if [ "\$DASHBOARD_READY" = true ]; then
-    echo -e "\${GREEN}✓ Dashboard is ready!\${NC}"
-else
-    echo -e "\${RED}✗ Dashboard failed to respond after \${MAX_WAIT}s\${NC}"
-    echo "Check logs/dashboard.log for details"
-    kill \$API_PID \$DASHBOARD_PID 2>/dev/null
-    exit 1
-fi
-
-echo ""
-echo -e "\${GREEN}✓ Claude-Nine is running!\${NC}"
-echo ""
-echo "  Dashboard: http://localhost:3001"
-echo "  API: http://localhost:8000"
-echo "  API Docs: http://localhost:8000/docs"
-echo ""
-echo "  API logs: logs/api.log"
-echo "  Dashboard logs: logs/dashboard.log"
-echo ""
-echo -e "\${YELLOW}Press Ctrl+C to stop both servers\${NC}"
-echo ""
-
-# Wait for Ctrl+C
-trap "echo ''; echo 'Stopping Claude-Nine...'; kill \$API_PID \$DASHBOARD_PID 2>/dev/null; exit" SIGINT SIGTERM
-
-wait
-EOF
-
-chmod +x start.sh
-echo -e "${GREEN}✓${NC} Created start.sh - Run Claude-Nine with: ./start.sh"
-
-# Create activation helper script
 cat > activate.sh << EOF
 #!/bin/bash
 
@@ -703,7 +583,6 @@ EOF
 
 chmod +x activate.sh
 echo -e "${GREEN}✓${NC} Created activate.sh - Activate venv with: source activate.sh"
-
 # Create or update .gitignore for logs and venv
 if ! grep -q "^logs/$" .gitignore 2>/dev/null; then
     echo "logs/" >> .gitignore
@@ -711,208 +590,6 @@ fi
 if ! grep -q "^venv/$" .gitignore 2>/dev/null; then
     echo "venv/" >> .gitignore
 fi
-
-# Create stop script
-cat > stop.sh << 'EOF'
-#!/bin/bash
-
-# Stop Claude-Nine
-
-# Colors for output
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
-
-echo -e "${YELLOW}Stopping Claude-Nine...${NC}"
-echo ""
-
-# Kill API server
-API_PIDS=$(pgrep -f "uvicorn app.main:app")
-if [ ! -z "$API_PIDS" ]; then
-    echo "Stopping API server (PIDs: $API_PIDS)..."
-    pkill -f "uvicorn app.main:app" 2>/dev/null
-    sleep 1
-    # Force kill if still running
-    pkill -9 -f "uvicorn app.main:app" 2>/dev/null
-else
-    echo "API server not running"
-fi
-
-# Kill Dashboard (handles both production 'next start' and dev 'next dev')
-DASH_PIDS=$(pgrep -f "next start" 2>/dev/null || pgrep -f "next dev" 2>/dev/null)
-if [ ! -z "$DASH_PIDS" ]; then
-    echo "Stopping Dashboard (PIDs: $DASH_PIDS)..."
-    pkill -f "next start" 2>/dev/null
-    pkill -f "next dev" 2>/dev/null
-    pkill -f "node.*next" 2>/dev/null
-    sleep 1
-    # Force kill if still running
-    pkill -9 -f "next start" 2>/dev/null
-    pkill -9 -f "next dev" 2>/dev/null
-    pkill -9 -f "node.*next" 2>/dev/null
-else
-    echo "Dashboard not running"
-fi
-
-echo ""
-echo -e "${GREEN}✓ Claude-Nine stopped${NC}"
-EOF
-
-chmod +x stop.sh
-echo -e "${GREEN}✓${NC} Created stop.sh - Stop Claude-Nine with: ./stop.sh"
-
-echo ""
-
-# Create README for user
-cat > GETTING_STARTED.md << 'EOF'
-# Getting Started with Claude-Nine
-
-## Quick Start
-
-### Activate Virtual Environment (Optional)
-Claude-Nine uses a Python 3.13 virtual environment to ensure compatibility:
-```bash
-source activate.sh
-```
-
-### Start Claude-Nine
-```bash
-./start.sh
-```
-
-This automatically activates the venv, starts both the API server and dashboard. Open http://localhost:3001 in your browser.
-
-### Stop Claude-Nine
-```bash
-./stop.sh
-```
-
-Or press `Ctrl+C` in the terminal where you ran `./start.sh`.
-
-## What's Running?
-
-- **Dashboard**: http://localhost:3001 - Your main UI
-- **API**: http://localhost:8000 - Backend server
-- **API Docs**: http://localhost:8000/docs - Interactive API documentation
-
-## Virtual Environment
-
-This installation uses a Python 3.13 virtual environment located in `venv/`.
-
-Benefits:
-- Isolated from your system Python
-- Uses Python 3.13 (required for CrewAI compatibility)
-- All dependencies installed separately from your global Python
-
-To manually activate:
-```bash
-source venv/bin/activate  # Linux/Mac
-source venv/Scripts/activate  # Git Bash on Windows
-```
-
-To deactivate:
-```bash
-deactivate
-```
-
-## First Steps
-
-1. **Visit the Dashboard**: http://localhost:3001
-2. **Follow the Tutorial**: An interactive tour will guide you through features
-3. **Create Your First Team**:
-   - Click "View Teams" → "+ New Team"
-   - Add agents to your team
-4. **Add Work Items**:
-   - Click "View Work Items" → "+ New Work Item"
-   - Or integrate with Azure DevOps/Jira/GitHub
-5. **Assign Work & Start**:
-   - Use bulk assignment to queue work for your team
-   - Start the team and watch your AI agents work!
-
-## Configuration
-
-### API Key
-Your Anthropic API key is stored in `api/.env`. To update it:
-```bash
-nano api/.env  # or use your favorite editor
-# Edit the ANTHROPIC_API_KEY line
-```
-
-### Database
-Your data is stored in `api/claude_nine.db` (SQLite file).
-- No cloud database needed
-- Portable - just copy the file to backup
-- View with: `sqlite3 api/claude_nine.db`
-
-## Troubleshooting
-
-### Port Already in Use
-If port 8000 or 3001 is already taken:
-```bash
-# Kill existing process
-./stop.sh
-
-# Or manually:
-lsof -ti:8000 | xargs kill -9
-lsof -ti:3001 | xargs kill -9
-```
-
-### API Not Starting
-Check if your Anthropic API key is set in `api/.env`.
-
-### Dashboard Build Errors
-Try clearing node_modules:
-```bash
-cd dashboard
-rm -rf node_modules package-lock.json
-npm install
-cd ..
-```
-
-### Python Version Issues
-This installation requires Python 3.13 for CrewAI compatibility. If you see import errors:
-1. Verify you're using the venv: `source activate.sh`
-2. Check Python version: `python --version` (should be 3.13.x)
-3. Reinstall dependencies: `pip install -r api/requirements.txt -r claude-multi-agent-orchestrator/requirements.txt`
-
-## Documentation
-
-- **Full Guide**: See `docs/local-setup-guide.md`
-- **Bulk Assignment**: See `docs/bulk-assignment-guide.md`
-- **API Reference**: http://localhost:8000/docs (when API is running)
-
-## Where Everything Lives
-
-```
-Claude-Nine/
-├── venv/                   # Python 3.13 virtual environment
-├── api/                    # Backend (FastAPI)
-│   ├── claude_nine.db      # Your local database
-│   ├── .env                # Configuration (API keys)
-│   └── app/                # API code
-├── dashboard/              # Frontend (Next.js)
-│   └── app/                # Dashboard pages
-├── claude-multi-agent-orchestrator/  # CrewAI orchestrator
-├── start.sh                # Start Claude-Nine
-├── stop.sh                 # Stop Claude-Nine
-├── activate.sh             # Activate Python venv
-└── GETTING_STARTED.md      # This file
-```
-
-## Need Help?
-
-- Check the tutorial (? icon in dashboard header)
-- Read the docs in `docs/`
-- View API documentation at http://localhost:8000/docs
-- Check issues at https://github.com/bobum/Claude-Nine/issues
-
----
-
-**Happy coding with your AI development team! 🚀**
-EOF
-
-echo -e "${GREEN}✓${NC} Created GETTING_STARTED.md"
-
 echo ""
 echo -e "${GREEN}╔════════════════════════════════════════════════════════════╗${NC}"
 echo -e "${GREEN}║                                                            ║${NC}"
