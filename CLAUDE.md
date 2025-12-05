@@ -1128,6 +1128,13 @@ def start_team(team_id: UUID, db: Session):
 - Memory isolation
 - Allows parallel team execution
 
+**PID Tracking** (for cleanup):
+- PIDs are written to `logs/orchestrator.pids` when processes start
+- Format: `PID:team_id` per line
+- `./stop.sh` kills all tracked processes
+- On API startup, stale processes are automatically detected and killed
+- **IMPORTANT**: Always use `./stop.sh` when debugging to avoid zombie processes!
+
 ### Integration Branch
 
 All feature branches merge into an integration branch:
@@ -1276,6 +1283,51 @@ git worktree remove .agent-workspace/worktree-name --force
 git worktree prune
 # Or run cleanup-only mode:
 python orchestrator.py --cleanup-only
+```
+
+#### Stale Orchestrator Processes (IMPORTANT for Debugging)
+
+**Cause**: The API was restarted (e.g., during debugging) but orchestrator subprocesses kept running with OLD code.
+
+**Symptoms**:
+- Multiple orchestrator processes running
+- Changes to orchestrator code not taking effect
+- Unexpected behavior after restarting the API
+- High CPU/memory usage from zombie processes
+
+**Solution**:
+```bash
+# ALWAYS use stop.sh to stop Claude-Nine
+./stop.sh
+
+# This kills:
+# 1. Orchestrator subprocesses (from logs/orchestrator.pids)
+# 2. API server (uvicorn)
+# 3. Dashboard (Next.js)
+```
+
+**Prevention**:
+- **Always run `./stop.sh` before restarting** during development/debugging
+- Don't just stop the API - orchestrator subprocesses will keep running!
+- The API automatically cleans up stale processes on startup, but it's better to stop them explicitly
+
+**How PID Tracking Works**:
+- When an orchestrator subprocess starts, its PID is written to `logs/orchestrator.pids`
+- Format: `PID:team_id` (one per line)
+- `stop.sh` reads this file and kills all listed processes
+- PIDs are removed when processes complete or are stopped via API
+
+**Manual Cleanup** (if needed):
+```bash
+# Check for running orchestrator processes
+cat logs/orchestrator.pids
+ps aux | grep orchestrator.py
+
+# Kill manually if needed
+kill <PID>
+
+# Clear the PID file
+> logs/orchestrator.pids
 ```
 
 #### "API key not found"

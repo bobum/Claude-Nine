@@ -3,6 +3,14 @@ Orchestrator Service - Manages team execution and agent orchestration
 
 This service acts as the bridge between the FastAPI backend and the CrewAI orchestrator.
 It handles spawning orchestrator processes, tracking their status, and syncing back to the database.
+
+IMPORTANT: Orchestrator processes run as subprocesses and their PIDs are tracked in a file
+(logs/orchestrator.pids) for cleanup. When stopping Claude-Nine or debugging:
+- Always use ./stop.sh to ensure ALL processes are killed (API, Dashboard, AND orchestrators)
+- If debugging the API, orchestrator subprocesses will continue running with OLD code
+- Run ./stop.sh before restarting to ensure clean state
+
+See CLAUDE.md for more details on subprocess management.
 """
 
 import os
@@ -12,6 +20,7 @@ import threading
 import json
 import tempfile
 import logging
+import signal
 from typing import Dict, List, Optional
 from pathlib import Path
 from datetime import datetime
@@ -58,7 +67,13 @@ class OrchestratorService:
 
     Each team gets its own orchestrator process that runs in the background.
     The service tracks running orchestrators and provides status updates.
+
+    PIDs are persisted to logs/orchestrator.pids so they can be killed by stop.sh
+    even if the API is restarted or crashes.
     """
+
+    # PID file for tracking orchestrator processes across API restarts
+    PID_FILE = Path(__file__).parent.parent.parent.parent / "logs" / "orchestrator.pids"
 
     def __init__(self):
         # Track running orchestrators: team_id -> subprocess info
@@ -67,6 +82,12 @@ class OrchestratorService:
 
         # Path to the orchestrator script
         self.orchestrator_script = self._find_orchestrator_script()
+
+        # Ensure logs directory exists
+        self.PID_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+        # Clean up any stale orchestrator processes from previous runs
+        self._cleanup_stale_processes()
 
     def _find_orchestrator_script(self) -> Path:
         """Find the orchestrator.py script in the project"""
@@ -82,6 +103,97 @@ class OrchestratorService:
             )
 
         return orchestrator_script
+
+    def _add_pid_to_file(self, pid: int, team_id: str) -> None:
+        """Add an orchestrator PID to the tracking file."""
+        try:
+            with open(self.PID_FILE, 'a') as f:
+                f.write(f"{pid}:{team_id}\n")
+            logger.info(f"Added orchestrator PID {pid} for team {team_id} to {self.PID_FILE}")
+        except Exception as e:
+            logger.warning(f"Could not write PID to file (non-fatal): {e}")
+
+    def _remove_pid_from_file(self, pid: int) -> None:
+        """Remove an orchestrator PID from the tracking file."""
+        try:
+            if not self.PID_FILE.exists():
+                return
+
+            # Read all lines, filter out this PID, write back
+            with open(self.PID_FILE, 'r') as f:
+                lines = f.readlines()
+
+            with open(self.PID_FILE, 'w') as f:
+                for line in lines:
+                    if not line.startswith(f"{pid}:"):
+                        f.write(line)
+
+            logger.info(f"Removed orchestrator PID {pid} from {self.PID_FILE}")
+        except Exception as e:
+            logger.warning(f"Could not remove PID from file (non-fatal): {e}")
+
+    def _cleanup_stale_processes(self) -> None:
+        """
+        Clean up any orchestrator processes from previous API runs.
+
+        This handles the case where the API was restarted but orchestrator
+        subprocesses kept running (common during debugging).
+        """
+        if not self.PID_FILE.exists():
+            return
+
+        logger.info("Checking for stale orchestrator processes...")
+        stale_pids = []
+
+        try:
+            with open(self.PID_FILE, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if ':' in line:
+                        pid_str, team_id = line.split(':', 1)
+                        try:
+                            pid = int(pid_str)
+                            # Check if process is still running
+                            if self._is_process_running(pid):
+                                logger.warning(
+                                    f"Found stale orchestrator process PID {pid} for team {team_id}. "
+                                    "Terminating..."
+                                )
+                                self._kill_process(pid)
+                            stale_pids.append(pid)
+                        except (ValueError, ProcessLookupError):
+                            pass
+
+            # Clear the PID file after cleanup
+            if stale_pids:
+                open(self.PID_FILE, 'w').close()
+                logger.info(f"Cleaned up {len(stale_pids)} stale orchestrator process(es)")
+
+        except Exception as e:
+            logger.warning(f"Error during stale process cleanup: {e}")
+
+    def _is_process_running(self, pid: int) -> bool:
+        """Check if a process with the given PID is running."""
+        try:
+            # On Unix, sending signal 0 checks if process exists
+            os.kill(pid, 0)
+            return True
+        except OSError:
+            return False
+
+    def _kill_process(self, pid: int) -> None:
+        """Kill a process by PID."""
+        try:
+            # Try graceful termination first
+            os.kill(pid, signal.SIGTERM)
+            # Give it a moment to terminate
+            import time
+            time.sleep(1)
+            # Force kill if still running
+            if self._is_process_running(pid):
+                os.kill(pid, signal.SIGKILL)
+        except OSError as e:
+            logger.warning(f"Could not kill process {pid}: {e}")
 
     def start_team(self, team_id: UUID, db: Session, dry_run: bool = False) -> dict:
         """
@@ -216,6 +328,9 @@ class OrchestratorService:
             except Exception as e:
                 logger.warning(f"Could not start telemetry monitoring (non-fatal): {e}")
 
+            # Persist PID to file for cleanup by stop.sh or on API restart
+            self._add_pid_to_file(process.pid, team_id_str)
+
             # Update Run record to 'running' if one exists
             active_run = db.query(Run).filter(
                 Run.team_id == team_id,
@@ -294,12 +409,16 @@ class OrchestratorService:
             telemetry_service.stop_monitoring(team_id_str)
 
             # Terminate the process
+            pid = process.pid
             process.terminate()
             try:
                 process.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait()
+
+            # Remove PID from tracking file
+            self._remove_pid_from_file(pid)
 
             # Clean up temp files
             if os.path.exists(orch_info['tasks_file']):
@@ -353,6 +472,9 @@ class OrchestratorService:
             logger.info(f"Orchestrator stdout:\n{stdout}")
         if stderr:
             logger.error(f"Orchestrator stderr:\n{stderr}")
+
+        # Remove PID from tracking file now that process has completed
+        self._remove_pid_from_file(process.pid)
 
         # Process has finished
         with self._lock:
