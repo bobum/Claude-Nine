@@ -813,6 +813,23 @@ Be careful to produce valid, working code in your resolutions.
         except Exception as e:
             logger.error(f"Error during cleanup: {e}")
 
+    def _update_task_agent_name(self, work_item_id: str, agent_name: str):
+        """Update the agent_name for a given task in the database."""
+        if not self.team_id or not work_item_id:
+            return
+
+        try:
+            api_url = os.getenv("CLAUDE_NINE_API_URL", "http://localhost:8000")
+            response = requests.patch(
+                f"{api_url}/api/runs/tasks/by-work-item/{work_item_id}",
+                params={"agent_name": agent_name},
+                timeout=5
+            )
+            response.raise_for_status()  # Raise an exception for bad status codes
+            logger.info(f"Successfully updated task for work item {work_item_id} with agent_name: {agent_name}")
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"Failed to update task with agent_name: {e}")
+
     def run(self):
         """
         Run the orchestrator with all agents and tasks.
@@ -853,6 +870,12 @@ Be careful to produce valid, working code in your resolutions.
                     logger.warning(f"[RESILIENT] Skipping agent for {feature_config.get('name', 'unknown')}")
                     continue
                 task = self.create_feature_task(agent, feature_config, worktree_path)
+                
+                # Update the task in the database with the agent's name (Fix for Issue #39)
+                work_item_id = feature_config.get('work_item_id')
+                agent_name = feature_config.get('name', 'unknown_agent')
+                self._update_task_agent_name(work_item_id, agent_name)
+
                 feature_agents.append(agent)
                 feature_tasks.append(task)
                 worktree_paths.append(worktree_path)
