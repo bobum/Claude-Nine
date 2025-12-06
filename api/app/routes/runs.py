@@ -1,5 +1,6 @@
 """Run management routes for orchestrator session tracking"""
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 from typing import List
@@ -110,6 +111,41 @@ def update_run_status(
         run.completed_at = datetime.utcnow()
     if error_message:
         run.error_message = error_message
+
+    db.commit()
+    db.refresh(run)
+    return run
+
+
+class CompletionSummary(BaseModel):
+    """Schema for run completion summary."""
+    integration_branch: str
+    merged_branches: List[str]
+    files_changed: int
+    lines_added: int
+    lines_removed: int
+    work_items: List[dict]  # List of {title, description, files} for each work item
+
+
+@router.patch("/{run_id}/complete")
+def complete_run(
+    run_id: UUID,
+    summary: CompletionSummary,
+    db: Session = Depends(get_db)
+):
+    """
+    Mark a run as completed with a summary.
+
+    This endpoint is called by the orchestrator when all tasks complete
+    and branches are merged successfully.
+    """
+    run = db.query(Run).filter(Run.id == run_id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    run.status = "completed"
+    run.completed_at = datetime.utcnow()
+    run.completion_summary = summary.model_dump()
 
     db.commit()
     db.refresh(run)

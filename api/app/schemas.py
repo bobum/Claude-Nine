@@ -220,6 +220,7 @@ class Run(RunBase):
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     error_message: Optional[str] = None
+    completion_summary: Optional[dict] = None  # Summary of run completion
     created_at: datetime
     updated_at: datetime
     tasks: List[RunTask] = []

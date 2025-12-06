@@ -315,3 +315,56 @@ class TestUpdateTaskByWorkItem:
             f"/api/runs/tasks/by-work-item/{fake_id}?status=running"
         )
         assert response.status_code == 404
+
+
+class TestCompleteRun:
+    """Tests for PATCH /api/runs/{run_id}/complete"""
+
+    def test_complete_run_with_summary(self, client, created_run):
+        """Complete a run with summary data."""
+        run_id = created_run["id"]
+
+        summary = {
+            "integration_branch": "integration/test123",
+            "merged_branches": ["feature/auth", "feature/logging"],
+            "files_changed": 15,
+            "lines_added": 500,
+            "lines_removed": 50,
+            "work_items": [
+                {"title": "Auth Feature", "description": "User authentication", "branch": "feature/auth"},
+                {"title": "Logging", "description": "Add logging", "branch": "feature/logging"}
+            ]
+        }
+
+        response = client.patch(f"/api/runs/{run_id}/complete", json=summary)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "completed"
+        assert data["completed_at"] is not None
+        assert data["completion_summary"] is not None
+        assert data["completion_summary"]["integration_branch"] == "integration/test123"
+        assert len(data["completion_summary"]["merged_branches"]) == 2
+        assert data["completion_summary"]["files_changed"] == 15
+
+    def test_complete_run_not_found(self, client):
+        """Complete nonexistent run returns 404."""
+        fake_id = str(uuid4())
+        summary = {
+            "integration_branch": "integration/fake",
+            "merged_branches": [],
+            "files_changed": 0,
+            "lines_added": 0,
+            "lines_removed": 0,
+            "work_items": []
+        }
+        response = client.patch(f"/api/runs/{fake_id}/complete", json=summary)
+        assert response.status_code == 404
+
+    def test_complete_run_validates_summary(self, client, created_run):
+        """Complete run validates summary fields."""
+        run_id = created_run["id"]
+
+        # Missing required fields
+        invalid_summary = {"integration_branch": "test"}
+        response = client.patch(f"/api/runs/{run_id}/complete", json=invalid_summary)
+        assert response.status_code == 422  # Validation error
