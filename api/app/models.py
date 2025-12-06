@@ -191,6 +191,7 @@ class Run(Base):
     started_at = Column(DateTime(timezone=True))
     completed_at = Column(DateTime(timezone=True))
     error_message = Column(Text)
+    completion_summary = Column(JSON)  # Summary of run completion (branches, files, stats)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

@@ -806,6 +806,135 @@ Be careful to produce valid, working code in your resolutions.
             logger.error(f"Error creating PR: {e}")
             return None
 
+    def _get_diff_stats(self, integration_branch: str, main_branch: str = "main") -> Dict[str, int]:
+        """
+        Get diff statistics between integration branch and main.
+
+        Returns:
+            Dict with files_changed, lines_added, lines_removed
+        """
+        try:
+            # Get diff stats using git
+            result = subprocess.run(
+                ["git", "diff", "--stat", f"{main_branch}...{integration_branch}"],
+                capture_output=True,
+                text=True,
+                cwd=self.repo_path
+            )
+
+            if result.returncode != 0:
+                logger.warning(f"Failed to get diff stats: {result.stderr}")
+                return {"files_changed": 0, "lines_added": 0, "lines_removed": 0}
+
+            # Parse the last line which contains summary
+            # Format: "X files changed, Y insertions(+), Z deletions(-)"
+            lines = result.stdout.strip().split('\n')
+            if not lines:
+                return {"files_changed": 0, "lines_added": 0, "lines_removed": 0}
+
+            summary_line = lines[-1]
+            files_changed = 0
+            lines_added = 0
+            lines_removed = 0
+
+            # Extract numbers from summary line
+            import re
+            files_match = re.search(r'(\d+) files? changed', summary_line)
+            if files_match:
+                files_changed = int(files_match.group(1))
+
+            insertions_match = re.search(r'(\d+) insertions?\(\+\)', summary_line)
+            if insertions_match:
+                lines_added = int(insertions_match.group(1))
+
+            deletions_match = re.search(r'(\d+) deletions?\(-\)', summary_line)
+            if deletions_match:
+                lines_removed = int(deletions_match.group(1))
+
+            return {
+                "files_changed": files_changed,
+                "lines_added": lines_added,
+                "lines_removed": lines_removed
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting diff stats: {e}")
+            return {"files_changed": 0, "lines_added": 0, "lines_removed": 0}
+
+    def generate_completion_summary(self, merge_result: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Generate a completion summary for the run.
+
+        Args:
+            merge_result: Result from merge_all_branches
+
+        Returns:
+            Dict with summary data including branches, stats, and work item descriptions
+        """
+        integration_branch = merge_result.get("integration_branch", "")
+        merged_branches = merge_result.get("merged_branches", [])
+        main_branch = self.config.get("main_branch", "main")
+
+        # Get diff statistics
+        diff_stats = self._get_diff_stats(integration_branch, main_branch)
+
+        # Build work items summary from tasks config
+        work_items = []
+        for task in self.tasks_config:
+            work_item_info = {
+                "title": task.get("name", "Unknown"),
+                "description": task.get("goal", task.get("description", "")[:100]),
+                "branch": task.get("branch", "")
+            }
+            work_items.append(work_item_info)
+
+        summary = {
+            "integration_branch": integration_branch,
+            "merged_branches": merged_branches,
+            "files_changed": diff_stats["files_changed"],
+            "lines_added": diff_stats["lines_added"],
+            "lines_removed": diff_stats["lines_removed"],
+            "work_items": work_items
+        }
+
+        # Log the summary
+        logger.info("="*80)
+        logger.info("Run Completion Summary")
+        logger.info("="*80)
+        logger.info(f"Branch: {integration_branch}")
+        logger.info(f"All {len(merged_branches)} feature branches merged: {', '.join(merged_branches)} ✓")
+        logger.info(f"{diff_stats['files_changed']} files changed with ~{diff_stats['lines_added']} lines of new code")
+        logger.info("Work includes:")
+        for item in work_items:
+            logger.info(f"  - {item['title']}")
+        logger.info("="*80)
+
+        return summary
+
+    def _update_run_completion(self, run_id: str, summary: Dict[str, Any]):
+        """
+        Update the run with completion summary via API.
+
+        Args:
+            run_id: The run ID to update
+            summary: The completion summary data
+        """
+        if not run_id:
+            logger.warning("No run_id provided, skipping completion update")
+            return
+
+        try:
+            api_url = shared_settings.claude_nine_api_url
+            response = requests.patch(
+                f"{api_url}/api/runs/{run_id}/complete",
+                json=summary,
+                timeout=10
+            )
+            response.raise_for_status()
+            logger.info(f"Successfully updated run {run_id} with completion summary")
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"Failed to update run completion: {e}")
+
     def cleanup(self):
         """Clean up all worktrees on shutdown."""
         # Stop telemetry collector
@@ -1269,6 +1398,27 @@ Be careful to produce valid, working code in your resolutions.
                     merged_branches=merge_result["merged_branches"],
                     target_branch=self.config.get('main_branch', 'main')
                 )
+
+            # Post-completion Phase 4: Generate and send completion summary
+            if merge_result["success"]:
+                summary = self.generate_completion_summary(merge_result)
+                # Get run_id from the first task's run association (if available via API)
+                if self.team_id:
+                    # Try to find the run_id from the API
+                    try:
+                        api_url = shared_settings.claude_nine_api_url
+                        response = requests.get(
+                            f"{api_url}/api/runs/",
+                            params={"team_id": self.team_id, "status": "running", "limit": 1},
+                            timeout=5
+                        )
+                        if response.status_code == 200:
+                            runs = response.json()
+                            if runs:
+                                run_id = runs[0].get("id")
+                                self._update_run_completion(run_id, summary)
+                    except Exception as e:
+                        logger.warning(f"Could not update run completion via API: {e}")
 
             logger.info("="*80)
             logger.info("Orchestrator completed successfully")
