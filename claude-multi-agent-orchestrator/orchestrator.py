@@ -726,86 +726,6 @@ Be careful to produce valid, working code in your resolutions.
 
         return result
 
-    def create_pull_request(
-        self,
-        integration_branch: str,
-        merged_branches: List[str],
-        target_branch: str = "main"
-    ) -> Optional[str]:
-        """
-        Create a pull request from the integration branch to main using gh CLI.
-
-        Args:
-            integration_branch: The integration branch to create PR from
-            merged_branches: List of feature branches that were merged
-            target_branch: Target branch for the PR (default: main)
-
-        Returns:
-            str: PR URL if successful, None if failed
-        """
-        logger.info("="*80)
-        logger.info("Post-completion: Creating pull request")
-        logger.info("="*80)
-
-        # Build PR title
-        if len(merged_branches) == 1:
-            title = f"Feature: {merged_branches[0]}"
-        else:
-            title = f"Integration: {len(merged_branches)} features merged"
-
-        # Build PR body
-        body_lines = [
-            "## Summary",
-            "",
-            f"This PR contains {len(merged_branches)} merged feature branch(es):",
-            ""
-        ]
-        for branch in merged_branches:
-            body_lines.append(f"- `{branch}`")
-
-        body_lines.extend([
-            "",
-            "## Merged from integration branch",
-            "",
-            f"Integration branch: `{integration_branch}`",
-            "",
-            "---",
-            "",
-            "🤖 Generated with [Claude Code](https://claude.com/claude-code)"
-        ])
-
-        body = "\n".join(body_lines)
-
-        try:
-            # Use gh CLI to create the PR
-            result = subprocess.run(
-                [
-                    "gh", "pr", "create",
-                    "--base", target_branch,
-                    "--head", integration_branch,
-                    "--title", title,
-                    "--body", body
-                ],
-                capture_output=True,
-                text=True,
-                cwd=self.repo_path
-            )
-
-            if result.returncode == 0:
-                pr_url = result.stdout.strip()
-                logger.info(f"Successfully created PR: {pr_url}")
-                return pr_url
-            else:
-                logger.error(f"Failed to create PR: {result.stderr}")
-                return None
-
-        except FileNotFoundError:
-            logger.error("gh CLI not found. Install it from https://cli.github.com/")
-            return None
-        except Exception as e:
-            logger.error(f"Error creating PR: {e}")
-            return None
-
     def _get_diff_stats(self, integration_branch: str, main_branch: str = "main") -> Dict[str, int]:
         """
         Get diff statistics between integration branch and main.
@@ -1389,17 +1309,7 @@ Be careful to produce valid, working code in your resolutions.
             # Post-completion Phase 2: Merge all branches into integration branch
             merge_result = self.merge_all_branches()
 
-            # Post-completion Phase 3: Create PR if merge succeeded and configured
-            pr_url = None
-            create_pr = self.config.get('create_pr', False)  # Default: off (platform-specific)
-            if create_pr and merge_result["success"] and merge_result["integration_branch"]:
-                pr_url = self.create_pull_request(
-                    integration_branch=merge_result["integration_branch"],
-                    merged_branches=merge_result["merged_branches"],
-                    target_branch=self.config.get('main_branch', 'main')
-                )
-
-            # Post-completion Phase 4: Generate and send completion summary
+            # Post-completion Phase 3: Generate and send completion summary
             if merge_result["success"]:
                 summary = self.generate_completion_summary(merge_result)
                 # Get run_id from the first task's run association (if available via API)
@@ -1426,8 +1336,11 @@ Be careful to produce valid, working code in your resolutions.
             if merge_result["success"]:
                 logger.info(f"Integration branch: {merge_result['integration_branch']}")
                 logger.info(f"All {len(merge_result['merged_branches'])} branches merged successfully")
-                if pr_url:
-                    logger.info(f"Pull request created: {pr_url}")
+                logger.info("")
+                logger.info("Next steps:")
+                logger.info(f"  1. Review the integration branch: {merge_result['integration_branch']}")
+                logger.info(f"  2. Create a Pull Request/Merge Request in your git platform")
+                logger.info(f"  3. Merge into {self.config.get('main_branch', 'main')} after review")
             else:
                 logger.warning(f"Merge failed at: {merge_result['failed_branch']}")
                 logger.warning(f"Conflicts in: {merge_result['conflicting_files']}")
